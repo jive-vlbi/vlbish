@@ -1866,7 +1866,7 @@ class Mk5Parser(object):
         # collect all tokens that are 'text', 'number', 'float' or ':'
         value = ""
         while tok_tp(s) in ['text', 'number', 'float', 'colon']:
-            value = value + (repr(tok_val(s)) if tok_tp(s) is not 'colon' else ':')
+            value = value + (str(tok_val(s)) if tok_tp(s) is not 'colon' else ':')
             next(s)
         if not value:
             s.syntax_error("Unexpected token '{0}', expected option value?!".format( tok(s) ))
@@ -1955,7 +1955,7 @@ def do_vsi_s(env, ip, port, timeout, cmd):
     except socket.timeout:
         rv = "Woopsy - got a timeout"
     # strip newline
-    printf(env, "{0}:{1}/{2}".format(address.host, address.port, rv.strip("\n\r")))
+    printf(env, "{0}:{1}/{2}".format(ip, port, rv.strip("\n\r")))
     return env
 
 def vsi_s(env, todo):
