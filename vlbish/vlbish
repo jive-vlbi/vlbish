@@ -291,11 +291,12 @@ class PrintHelp(argparse.Action):
     def __call__(self, the_parsert, *args):
         the_parsert.print_help() or sys.exit( 0 )
 
+arg0_or_zero = choice(truth, itemgetter(0), const(0))
 def usage(*args):
     # http://stackoverflow.com/a/1676860
     import pydoc, inspect
     # extract the documentation at the top of this module, put it through pydoc.pager and then exit :-)
-    return compose(choice(const(args), const(args[0]), const(0)), pydoc.pager, inspect.getcomments, itemgetter(__name__))(sys.modules)
+    return compose(const(arg0_or_zero(args)), pydoc.pager, inspect.getcomments, itemgetter(__name__))(sys.modules)
 
 class PrintUsage(argparse.Action):
     def __call__(self, the_parsert, *args):
