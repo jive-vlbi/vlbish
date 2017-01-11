@@ -279,6 +279,7 @@ def maybe_exec(f, eret):
 # Can pass in None or "/path/to/file" and returns None or proc("/path/to/file") or eret
 # if proc(..) threw an exception
 maybe_process_f  = lambda proc, e=None: choice(choice(is_not_none, os.path.exists, const(e)), maybe_exec(proc, e), const(e))
+process_f        = lambda proc, e=None: choice(is_not_none, maybe_exec(proc, e), const(e))
 
 def do_raise(x):
     def actually_raise(*args):
@@ -2161,11 +2162,11 @@ class vlbish_ctx(object):
 
         # attempt to save history and aliases
         try:
-            maybe_process_f(READLINE.write_history_file)( self.historyFile )
+            process_f(READLINE.write_history_file)( self.historyFile )
         except Exception as E:
             printf(self, "Failed to save history"+repr(E))
         try:
-            maybe_process_f(compose(partial(pickle.dump, self.aliases), partial(swap_args(open), "w+b")))( self.aliasFile )
+            process_f(compose(partial(pickle.dump, self.aliases), partial(swap_args(open), "w+b")))( self.aliasFile )
         except Exception as E:
             printf(self, "Failed to save aliases: "+repr(E))
         printf(self, "\n*** kthxbye!")
