@@ -665,6 +665,7 @@ def handleCommand(env, mo):
     env.acquire()
     if env.jobid in env.jobs:
         env.jobs[ env.jobid ].commandLine = mo.string
+        printf(env, "Started background JOB[{0:d}]".format(env.jobid))
     env.release()
     return setattr_('selection', selection)(env)
 
