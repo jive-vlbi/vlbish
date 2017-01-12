@@ -22,14 +22,26 @@
 #   executes shell command(s) using ssh on a selection of hosts or is a vlbish built-in command. 
 #
 #   There are three (3) formats for a line of input:
+#
 #       [<selection>] / <commands>
 #           (attempts to) send the VSI/S commands to all machines in <selection> using TCP/IP
+#
 #       [<selection>] ! <shell commands>
 #           (attempts to) execute the shell commands on all machines in <selection> using ssh
 #                         if no selection given uses last-known selection
+#
 #       <commands>
 #           if recognized as vlbish built-in command, executes as that, otherwise
 #           interpreted as VSI/S and sent to last-known selection using TCP/IP
+#
+#   In this version of vlbish it is possible to put multiple 'logical' lines of
+#   input on one physical line of input (all characters up to and including the
+#   newline) by separating the logical lines with two or more semicolons:
+#
+#       > 0/tstat?;; sleep 2;; 0!uname -a
+#
+#   is now interpreted and executed as if three separate lines of input were given: a VSI/S
+#   command, a vlbish builtin command and a shell command.
 #
 #   vlbish has lots of built-in knowledge to resolve <selection> into user/ip/port tuples. It also connects
 #   to the database @JIVE in order to resolve names and associations and equipment types. It is possible to
@@ -50,13 +62,13 @@
 #  
 #  As always: parameters in []'s are optional.
 #
-#    q - quit
-#    h - this message
+#    q                        - quit
+#    h                        - this message
 #    timeout [<amount>]       - set or query the socket timeout for 
 #                               communicating with the mk5s
-#    stripnl [true|false]     - strip trailing CR/LF before sending the
-#                               command. Some equipment (DBBC) doesn't
-#                               like trailing newline ...
+#    stripnl [true|false]     - strip trailing CR/LF and replace with \0 before
+#                               sending the command. Some equipment (e.g. DBBC) doesn't
+#                               use NUL character as termination character
 #    resolve [<sel>]          - resolve the indicated <selection> or current
 #                               selection if no arg given. shows ip/port/user.
 #    symbolicresolve [<sel>]  - show what <sel> symbolically resolves to
@@ -99,14 +111,15 @@
 #   host.name  DNS resolvable host name
 #   key=value  set option with name <key> to value <value> (<value> may not contain ',')
 #              some special options are:
-#                 repeat=<n>      repeatedly execute command(s) every <n> seconds
-#                 experiment=<id> restrict lookup(s) to experiment
-#                 subjob=<n>      restrict lookup(s) to subjob
-#                 runtime=<name>  auto prefix VSI/S commands with "runtime=<name>;"
-#                 stripnl=<t|f>   change CRLF line termination to NULL if true
-#                                 (DBBCCtrl.exe needs NULL termination character i.s.o. CRLF)
-#                 fila=<t|f>      auto prefix command with "fila10g=" e.g. for comms with
-#                                 FiLa10G through DBBCServer.exe
+#                 repeat=<d>[:<n>] repeatedly execute command(s) every <d>
+#                                  seconds for <n> times. <n> defaults to 'unlimited'
+#                 experiment=<id>  restrict lookup(s) to experiment
+#                 subjob=<n>       restrict lookup(s) to subjob
+#                 runtime=<name>   auto prefix VSI/S commands with "runtime=<name>;"
+#                 stripnl=<t|f>    change CRLF line termination to NULL if true
+#                                  (DBBCCtrl.exe needs NULL termination character i.s.o. CRLF)
+#                 fila=<t|f>       auto prefix command with "fila10g=" e.g. for comms with
+#                                  FiLa10G through DBBCServer.exe
 #
 #   (Entries in) the selection can be modified, using one or more of the 
 #   following supported modifiers. It is possible to combine multiple
@@ -1550,10 +1563,6 @@ def expand_stations(mo):
                raw_query(dbManager.get('correlator_control'), (stations_qry_now if subjob is None else stations_qry_subjob)(subjob)))
 
 
-# expect type 'Station'
-#def expand_station(station):
-#    return resolved_name(name=station)
-
 # return the string with all aliases recursively expanded
 def maybe_resolve_alias(txt_in, **env):
     # pre-process the aliases
@@ -2136,9 +2145,9 @@ class background_job(object):
 class vlbish_ctx(object):
 
     def __init__(self, cmdgen, pfn, cfn, histFile):
-        #self.cmdGenerator = cmdgen
         self.lijst        = [cmdgen] if type(cmdgen) is not list else cmdgen # can now pass in list-of-generators ...
         self.lines        = iter([])
+        self.lastGen      = self.lijst[-1]
         self.printfn      = pfn
         self.collectfn    = cfn
         self.historyFile  = histFile
@@ -2206,7 +2215,12 @@ class vlbish_ctx(object):
                 try:
                     # Current list of lines exhausted
                     # attempt to get next line from generator
-                    self.lines = iter(filter(truth, map(cleanup, linesplit(self.lijst[-1].send(self.selection)))))
+                    # We must detect if a new generator was added 'behind our backs'
+                    # because the first time something is sent into a
+                    # generator, it MUST be None, according to the Pythonians
+                    toSend       = self.selection if self.lijst[-1] is self.lastGen else None
+                    self.lines   = iter(filter(truth, map(cleanup, linesplit(self.lijst[-1].send(toSend)))))
+                    self.lastGen = self.lijst[-1]
                 except StopIteration:
                     # current line generator is exhausted, remove from stack
                     self.lijst.pop()
