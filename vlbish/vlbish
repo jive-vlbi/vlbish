@@ -225,11 +225,10 @@
 #
 # Author:  Harro Verkouter  3 Sep 2010
 # Rewrite: Harro Verkouter 24 Nov 2016
-import sys, os, re, time, socket, traceback, pickle, fcntl, termios, struct, copy
-import thread, threading, signal, Queue, importlib, collections, argparse
+import sys, os, re, time, socket, traceback, pickle, fcntl, termios, struct, copy, threading, importlib, collections, argparse
 from functools import partial
-from itertools import product, dropwhile, takewhile, repeat
-from operator  import truth, contains, eq, is_not, not_, attrgetter, itemgetter, methodcaller, setitem, __add__, is_
+from itertools import product, repeat
+from operator  import truth, contains, eq, is_not, attrgetter, itemgetter, methodcaller, __add__, is_
 
 # some global stuff
 version     = "$Id$"
@@ -459,7 +458,7 @@ class NoDBManager(object):
 class YesDBManager(collections.defaultdict):
     
     def __init__(self, dbs):
-        super(collections.defaultdict, YesDBManager).__init__(self)
+        super(YesDBManager, self).__init__()
         self.databases   = dbs
 
     def __missing__(self, key):
@@ -577,10 +576,10 @@ is_recording = maybe_get('record')
 
 handleRecord = lambda *args: \
                 setattr_('record',
-                    compose(choice(is_not_none,
-                                   do_raise(RuntimeError("Already recording - maybe stop it first?")),
-                                   const(open(args[1].group('file'), 'w'))),
-                            is_recording)(args[0]))(args[0])
+                         compose(choice(is_not_none,
+                                        do_raise(RuntimeError("Already recording - maybe stop it first?")),
+                                        const(open(args[1].group('file'), 'w'))),
+                                 is_recording)(args[0]))(args[0])
 
 handleStop   = combine(logic_or, 
                        compose(choice(is_not_none,
@@ -721,27 +720,29 @@ def mk_tokenizer(tokens):
         # into:
         #    tokens = [ (rx_match_string_at_pos, token_fn), ... ]
         # so the only input that 'rx_match_string_at_pos' is the position where to attempt the match
-        pp_tokens = map(lambda rx_tp: (partial(rx_tp[0].match, string), rx_tp[1]), tokens)
-        pos       = 0
-        escape    = None
+        pp_tokens      = map(lambda rx_tp: (partial(rx_tp[0].match, string), rx_tp[1]), tokens)
+        # 'creator' is the function that makes the token -
+        (pos, creator) = (0, itemgetter(1))
         while pos<len(string):
             # Run all known regexps against the current string and filter out which one matched
-            # If the escapert is in effect, use that function to create the token instead
-            creator = itemgetter(1) if escape is None else escape
             moList  = map(lambda mo_tp: (mo_tp[0], (creator(mo_tp))(mo_tp[0], position=pos, **env)),
                           filter(filter_fn,
                                  map(lambda rx_tf: (rx_tf[0](pos), rx_tf[1]), pp_tokens)))
             if len(moList)==0:
                 raise RuntimeError, "\n{0}\n{1:>{2}s}^\n{3} tokens matched here".format(string, "", pos, len(moList))
             # extract match-object and the token from the result list
-            (mo, tok) = moList[0]
-            pos      += (mo.end() - mo.start())
-            if tok is not None:
-                if isinstance(tok, escape_type):
-                    escape = tok
+            (mo, token)  = moList[0]
+            pos         += (mo.end() - mo.start())
+            if token is not None:
+                # If we find a token that is of the escape type, the next
+                # token will be passed to the escaper in stead of to the
+                # token's own 'creator', otherwise put back default
+                # behaviour
+                if isinstance(token, escape_type):
+                    creator = token
                 else:
-                    escape = None
-                    yield tok
+                    creator = itemgetter(1)
+                    yield token
         yield token_type(None, None)
     return do_tokenize
 
@@ -890,8 +891,8 @@ get_options = d_filter_n(['type', 'value'])
 
 class Resolveable(object):
 
-    def __init__(self, type, value, **kwargs):
-        self.type = type
+    def __init__(self, tp, value, **kwargs):
+        self.type = tp
         self.value = value
         D( self.update( **kwargs ) )
 
@@ -1997,13 +1998,12 @@ def do_ssh_exec(env, address, sshcmd):
     try:
         if SUBPROCESS:
             p = SUBPROCESS.Popen([sshcmd], shell=True, stdin=SUBPROCESS.PIPE, stdout=SUBPROCESS.PIPE, close_fds=True)
-            (cout, cin) = (p.stdout, p.stdin)
+            (cout, _cin) = (p.stdout, p.stdin)
         else:
-            (cout, cin) = os.popen2(l)
+            (cout, _cin) = os.popen2(l)
         collectf(env, "{0}: {1}".format(address.host, cout.read().strip("\r\n")))
     except:
         collectf(env, "{0}/woops. {1}".format(address.host, [str(x) for x in sys.exc_info()[:2]]))
-        pass
     return env
 
 ssh_cmd = "ssh {port}{user}{host} '{cmd}'".format
@@ -2044,6 +2044,7 @@ class prompt:
 
 ## Functors/functions to handle the output of the routines
 def printfn(x):
+    import pydoc
     # if no screen size know, always page, otherwise only
     # if txt to long
     sz = screenSize[0]*screenSize[1] if screenSize else None
@@ -2052,7 +2053,7 @@ def printfn(x):
     else:
         print x
 
-def ignorefn(x):
+def ignorefn(*args):
     pass
 
 class collector:
@@ -2061,10 +2062,6 @@ class collector:
 
     def __call__(self, x):
         self.items.append(x)
-
-
-def maybe_process_file(filename, fn):
-    return 
 
 
 ####################################################################
@@ -2263,8 +2260,8 @@ def commander(environment, cmd):
     # Did the user specify a new selection?
     return record_cmd(environment)
 
-def vlbish_main(reader, pfn, cfn, historyFile):
-    with vlbish_ctx(reader, pfn, cfn, historyFile) as env:
+def vlbish_main(reader, pfn, cfn, histf):
+    with vlbish_ctx(reader, pfn, cfn, histf) as env:
         printf(env, "Welcome to vlbish {0} [{1}]".format(version, getfeatures()))
         printf(env, " q to quit, h for help")
         reduce(commander, env, env)
