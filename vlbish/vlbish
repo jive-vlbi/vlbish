@@ -1077,7 +1077,7 @@ class Node(Resolveable):
         # transform the IP addresses into "regexp ('^jive5ab://{ip}[{port}]')" conditions;
         portcond   = port_condition(self)
         # recorded entries
-        dt_dsl_rx  = "data_type.data_source_location regexp ('^[^:]+://{{0}}{0}')".format
+        dt_dsl_rx  = "data_routing.data_source_location regexp ('^[^:]+://{{0}}{0}')".format
         di_dsl_rx  = "data_input_org.data_source_location regexp ('^[^:]+://sfxc-{0}.sfxc{1}')".format
         strm_conds = map(compose(dt_dsl_rx(portcond).format, attrgetter('host')), maybe_resolve_sfxc_node(self.value))
         rec_cond   = di_dsl_rx(self.value, portcond)
@@ -1184,6 +1184,25 @@ class Host(Resolveable):
 
     def resolve(self):
         return resolved_name(host=self.value).update( **self.options() )
+
+    def resolve_as_destination(self):
+        # Now it's time to go a-lookin
+        opts   = self.options()
+        exper  = opts.get('experiment')
+        subjob = opts.get('subjob')
+
+        portcond   = port_condition(self)
+        # transform the IP addresses into "regexp ('^jive5ab://{ip}[{port}]')" conditions;
+        dt_dsl_rx  = "data_routing.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
+
+        # transform query results; see above
+        # note: we disable the 'record_cond' because we don't want entries
+        # from the "recorded e-VLBI" section of data_input
+        return map(get_sender, raw_query(dbManager.get('correlator_control'),
+                                         query_select[truth_tbl(exper, subjob)] (
+                                                 experiment=exper, subjob=subjob,
+                                                 stream_conds=dt_dsl_rx(portcond).format(self.value),
+                                                 record_cond="1=0") ))
 
 
 filter_host_port = d_filter_n(['host', 'port'])
@@ -1338,14 +1357,15 @@ class ModifierDST(Resolveable):
         super(ModifierDST, self).__init__('dst', item, **kwargs)
 
     # dst <node>    : who is sending to node <node> [ :<port> ]
+    # dst <host>    : who is sending to host <host> [ :<port> ]
     # dst <flexbuff>: who is sending to this flexbuff 
     # dst <recorded>: where was the recorded thing being recorded on?
     def resolve(self):
         dst_type = type(self.value)
-        if dst_type in [Node, FlexBuff, Recorded]:
+        if dst_type in [Node, FlexBuff, Host, Recorded]:
             return self.value.resolve_as_destination()
 
-    modifyable_types = [Node, FlexBuff, Recorded]
+    modifyable_types = [Node, Host, FlexBuff, Recorded]
 
     @staticmethod
     def modify(item):
