@@ -1077,7 +1077,7 @@ class Node(Resolveable):
         # transform the IP addresses into "regexp ('^jive5ab://{ip}[{port}]')" conditions;
         portcond   = port_condition(self)
         # recorded entries
-        dt_dsl_rx  = "data_routing.data_source_location regexp ('^[^:]+://{{0}}{0}')".format
+        dt_dsl_rx  = "data_routing.data_dest_location regexp ('^[^:]+://{{0}}{0}')".format
         di_dsl_rx  = "data_input_org.data_source_location regexp ('^[^:]+://sfxc-{0}.sfxc{1}')".format
         strm_conds = map(compose(dt_dsl_rx(portcond).format, attrgetter('host')), maybe_resolve_sfxc_node(self.value))
         rec_cond   = di_dsl_rx(self.value, portcond)
