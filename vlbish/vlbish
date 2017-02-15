@@ -845,6 +845,12 @@ def maybe_lookup_flexbuff(num_or_station, by_station):
         mk_entry = lambda row: resolved_name(host=row[0], user='jops')
     return map(mk_entry, query(dbManager.get('hardware'), *b))
 
+def maybe_get_fb_ip_and_host(fb):
+    return reduce(__add__, map(combine(mk_list, itemgetter(0), itemgetter(1)),
+                               query(dbManager.get('hardware'),
+                                     ["name", "control_ip"], "local_flexbuff", "name='{0}'".format(fb_name(fb)))),
+                  [])
+
 
 # replace with the dbbc_proxy associated with the station
 def maybe_lookup_dbbc(estation):
@@ -986,12 +992,28 @@ class Station(Resolveable):
         # if no results from the database then resolve to just-a-name ...
         rows = raw_query(dbManager.get('correlator_control'), station_qry(experiment_f(self.options()), self.value))
         mk_rv = methodcaller('__call__', Station(self.value, **self.options()))
-        return map(compose(mk_rv, mk_ds, itemgetter(0)), rows) if rows else resolved_name(host=self.value)
+        return map(compose(mk_rv, mk_ds, itemgetter(0)), rows) if rows else [resolved_name(host=self.value)]
 
     def resolve_as_source(self):
         # look up where this station is sending to
+        # based on set options, figure out which query to use
+        opts    = self.options()
+        exper   = opts.get('experiment')
+        subjob  = opts.get('subjob')
+        # entries in data_input/data_routing have "data_input_org = '<sender_type>://<station>'"
+
+        strm_cond  = "data_routing.data_source_location regexp ('^[^:]+://{0}')".format(self.value)
+        rec_cond   = "data_type.data_source_location regexp ('^[^:]+://{0}')".format(self.value)
+
+        # transform query results
+        return map(get_receiver, raw_query(dbManager.get('correlator_control'),
+                                           query_select[truth_tbl(exper, subjob)] (
+                                                 experiment=exper, subjob=subjob,
+                                                 stream_conds=strm_cond,
+                                                 record_cond=rec_cond) ))
+
         # self.resolve() should yield "Mk5 <station>" or "FiLa <station>" or nothing
-        return map(ModifierSRC, self.resolve())
+        #return map(ModifierSRC, self.resolve())
 
 class DBBC(Resolveable):
     def __init__(self, dbbc, **kwargs):
@@ -1108,6 +1130,40 @@ class Recorded(Resolveable):
         return choice_kw(is_not_none_kw, identity, const([]))(self.options().get('receiver'), **self.options())
 
 
+def maybe_unmap_sfxc_control_ip(ip):
+    return map(lambda row: Node(row[0]),
+               query(dbManager.get('hardware'), ["name"], "sfxc_node", "control_ip='{0}'".format(ip)))
+
+extract_mk5_from_name = re.compile(r"^(?P<mk5c>c)?(?P<number>[0-9]+)$").match
+def process_mk5_row(row):
+    mo = extract_mk5_from_name(row)
+    return compose(Modifier5C if mo.group('mk5c') else identity, Mk5, Number, int)( mo.group('number') )
+
+def maybe_unmap_local_mk5_control_ip(ip):
+    return map(process_mk5_row, query(dbManager.get('hardware'), ["name"], "mark5", "control_ip='{0}'".format(ip)))
+
+def maybe_unmap_remote_mk5_control_ip(ip):
+    return map(compose(Mk5, Station),
+               query(dbManager.get('ccs'), ["e_station_name"], "eVLBI_Params", "e_station_control_ip='{0}'".format(ip)))
+
+def maybe_unmap_local_flexbuff_control_ip(ip):
+    return map(compose(combine(lambda fb_t, fb_i: FlexBuff(fb_t(fb_i)), get_fb_type, get_fb_id), methodcaller('groups'), match_flexbuff, itemgetter(0)),
+               query(dbManager.get('hardware'), ["name"], "local_flexbuff", "control_ip='{0}'".format(ip)))
+
+def maybe_unmap_remote_flexbuff_control_ip(ip):
+    return map(compose(FlexBuff, Station, itemgetter(0)),
+               query(dbManager.get('hardware'), ["station"], "remote_flexbuff", "control_ip='{0}'".format(ip)))
+
+def mk_host(mo):
+    # mo.group(1) == {host}   mo.group(2) == {port}
+    # Look through our Mk5, SFXC node or FlexBuff tables if we find an entry with name {host}
+    unmapped =  reduce(__add__, map(ylppa(mo.group(1)),
+                                    [maybe_unmap_sfxc_control_ip, maybe_unmap_local_mk5_control_ip,
+                                     maybe_unmap_remote_mk5_control_ip, maybe_unmap_local_flexbuff_control_ip,
+                                     maybe_unmap_remote_flexbuff_control_ip]), [])
+    return map(methodcaller('update', port=int(mo.group(2))), unmapped if unmapped else [Host(mo.group(1))])
+
+
 ############################################
 ##   fb = Number | Host
 ##
@@ -1116,7 +1172,7 @@ class Recorded(Resolveable):
 ## 0        1           2          3              4
 ##
 ## receiver_type = ^...://{host}:{port}/....
-mk_host     = lambda mo: Host(host=mo.group(1), port=int(mo.group(2)))
+#mk_host     = lambda mo: Host(host=mo.group(1), port=int(mo.group(2)))
 mk_receiver = compose(choice(is_not_none, mk_host, const((None,None))),
                        re.compile(r"^[^:]+://([^:]+):([0-9]+)", re.I).search)
 def get_sender(row):
@@ -1156,20 +1212,22 @@ class FlexBuff(Resolveable):
         # we cannot look up destinations for FlexBuff <station>
         if type(self.value) is Station:
             return []
+        # if we're looking up FlexBuff <number> we need to scan for both IP and Host name *sigh*
+        names    = maybe_get_fb_ip_and_host(self.value) if type(self.value) is Number else [self.value.value]
         # Now it's time to go a-lookin
-        opts   = self.options()
-        exper  = opts.get('experiment')
-        subjob = opts.get('subjob')
-
-        portcond = port_condition(self.value)
+        opts     = self.options()
+        exper    = opts.get('experiment')
+        subjob   = opts.get('subjob')
+        portcond = port_condition(opts)
+        #map(D, [opts, exper, subjob, portcond, names])
         # transform the IP addresses into "regexp ('^jive5ab://{ip}[{port}]')" conditions;
-        dt_dsl_rx  = "data_type.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
+        dt_dsl_rx  = "data_routing.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
         di_dsl_rx  = "data_input_org.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
-        strm_conds = map(compose(dt_dsl_rx(portcond).format, attrgetter('host')), maybe_lookup_flexbuff(fb_name(self.value), False))
-        rec_cond   = compose(di_dsl_rx(portcond).format, fb_name)(self.value)
+        strm_conds = map(dt_dsl_rx(portcond).format, names)
+        rec_cond   = "(" + " or ".join(map(di_dsl_rx(portcond).format, names)) + ")"
 
         # transform query results; see above
-        return map(get_sender, raw_query(dbManager.get('correlator_control'),
+        return map(compose(get_sender, D), raw_query(dbManager.get('correlator_control'),
                                          query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=" or ".join(strm_conds),
@@ -1532,13 +1590,17 @@ get_fb_id       = compose(itemgetter(0), filter_true)
 # return the subtype of the flexbuff: Number (for flexbuf<Number>) or Host (for aribox: flexbuf<Host>)
 get_fb_type     = choice(itemgetter(0), const(Number), const(Host))
 def mk_recorder(s):
-    # FORCE the system to match
-    (host, port) = match_recording(s).groups()
-    fb    = match_flexbuff(host)
-    sfxc  = match_sfxc(host)
-    return setattr_('port', int(port))(
-                FlexBuff(get_fb_type(fb.groups())(get_fb_id(fb.groups()))) if fb else
-                    Node(sfxc.group(1)) if sfxc else Host(host) )
+    mo = match_recording(s)
+    return setattr_('port', int(mo.group(2)))( mk_host(mo)[0] )
+
+#def mk_recorder_old(s):
+#    # FORCE the system to match
+#    (host, port) = match_recording(s).groups()
+#    fb    = match_flexbuff(host)
+#    sfxc  = match_sfxc(host)
+#    return setattr_('port', int(port))(
+#                FlexBuff(get_fb_type(fb.groups())(get_fb_id(fb.groups()))) if fb else
+#                    Node(sfxc.group(1)) if sfxc else Host(host) )
 
 def mk_sender(row):
     D( row )
