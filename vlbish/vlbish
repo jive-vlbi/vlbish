@@ -442,7 +442,8 @@ def getdbconnection(db, host, port):
     for attempt in [(host, port, db), ("127.0.0.1", forwards.get((host, port)), db)]:
         try:
             return MYSQL.connect(host=attempt[0], port=attempt[1], db=attempt[2], read_default_file="~/.my.cnf")
-        except:
+        except Exception as E:
+            print traceback.format_exc() if userinput.debug else str(E)
             pass
     return None
 
@@ -471,8 +472,7 @@ class YesDBManager(collections.defaultdict):
         if conn is None:
             return None
         try:
-            c = conn.cursor()
-            c.execute('SELECT 1;')
+            conn.ping()
             return conn
         except Exception as E:
             print traceback.format_exc() if userinput.debug else str(E)
