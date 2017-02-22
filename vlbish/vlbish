@@ -367,10 +367,14 @@ screenSize = getScreenSize()
 
 
 # debug?
-def print_debug(x):
-    print "DEBUG: ",x
-    return x
-D = print_debug if userinput.debug else identity
+def print_debug(pfx):
+    realpfx = "{0}:".format(pfx)
+    def print_it(x):
+        print realpfx,x
+    return print_it
+
+D  = print_debug("DEBUG") if userinput.debug else identity
+DD = (lambda y: print_debug(y)) if userinput.debug else identity
 
 # queries?
 def print_query(x):
@@ -818,8 +822,11 @@ class resolved_name(object):
     def update(self, **kwargs):
         return reduce(lambda acc, kv: setattr(acc, kv[0], kv[1]) or acc, kwargs.items(), self)
 
+    def options(self):
+        return dict(((k,v) for k,v in self.__dict__.iteritems() if k not in resolved_name.defaults.keys()))
+
     def __repr__(self):
-        optDict = dict(((k,v) for k,v in self.__dict__.iteritems() if k not in resolved_name.defaults.keys()))
+        optDict = self.options()
         return "{0} => {1}@{2}:{3}{4}".format(self.name, self.user, self.host, self.port, " "+repr(optDict) if optDict else "")
 
 
@@ -1984,7 +1991,7 @@ maybe_get_runtime = maybe_get('runtime')
 maybe_repeat      = maybe_get('repeat')
 have_timeout      = compose(choice(is_not_none, float, const(None)), maybe_get('timeout'))
 crlf2nul          = partial(re.compile(r'[\r\n]*$').sub, r'\0')    # replace end-of-line with NUL (for FiLa10G/DBBC)
-add_semicolon     = partial(re.compile(r'([^;])$').sub, r'\1;')    # add newline if none present
+add_semicolon     = partial(re.compile(r'([^;])$').sub, r'\1;')    # add semicolon if none present
 add_crlf          = partial(re.compile(r'$').sub, r'\r\n')         # add newline if none present
 
 
@@ -2060,7 +2067,7 @@ def vsi_s(env, todo):
     add_fila  = "fila10g={0}".format if need_fila(address) else identity
     runtime   = maybe_get_runtime(address)
     add_rt    = ("runtime={0};{{0}}".format(runtime)).format if runtime else identity
-    cmd       = compose(terminate, add_fila, add_rt)( cmd )
+    cmd       = compose(DD("vsi_s"), terminate, add_fila, add_rt, methodcaller('format', **address.options()))( cmd )
     vsi_args  = (env, address.host, address.port, env.timeout if have_to is None else have_to, cmd)
     rpt       = maybe_repeat( address )
     if rpt is not None:
