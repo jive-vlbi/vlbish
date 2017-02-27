@@ -371,10 +371,11 @@ def print_debug(pfx):
     realpfx = "{0}:".format(pfx)
     def print_it(x):
         print realpfx,x
+        return x
     return print_it
 
 D  = print_debug("DEBUG") if userinput.debug else identity
-DD = (lambda y: print_debug(y)) if userinput.debug else identity
+DD = (lambda y: print_debug(y)) if userinput.debug else (lambda y: identity)
 
 # queries?
 def print_query(x):
