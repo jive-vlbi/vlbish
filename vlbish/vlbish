@@ -384,7 +384,7 @@ def print_query(x):
 Q = print_query if userinput.queries else identity
 
 # regexen
-rxAlias     = re.compile(r"^alias((\s+(?P<alias>\S+))(\s+(?P<selection>\S+))?)?$", re.I).match
+rxAlias     = re.compile(r"^alias((\s+(?P<alias>\S+))(\s+(?P<selection>\S.+))?)?$", re.I).match
 rxDelete    = re.compile(r"^d(el(ete)?)?(\s+(?P<alias>\S+))?$", re.I).match
 rxPlay      = re.compile(r"^play\s+(?P<file>\S+)(\s+(?P<args>\S.*))?$", re.I).match
 rxQuit      = re.compile(r"^q(uit)?$", re.I).match
