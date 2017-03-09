@@ -553,7 +553,7 @@ def handleAlias(env, aliasmatch):
         graph      = reduce(lambda acc, arg: (acc.setdefault(arg[0], keySearch(arg[1])) is None) or acc, tmpAliases.iteritems(), {})
 
         # (3) detect cycles
-        if cycle_detect(graph):
+        if DD("cycle_detect: ")(cycle_detect(graph)):
             raise RuntimeError, "The definition of {0} => {1} would lead to a cycle in your aliases".format(name, definition)
         # (5) Profit!
         env.aliases[name] = definition
