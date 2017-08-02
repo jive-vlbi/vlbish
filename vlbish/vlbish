@@ -426,7 +426,7 @@ def query(db, c, t, w):
     try:
         cursor = db.cursor()
         cursor.execute(Q( mk_query(",".join(c), t, w, " and ".join(map(compose(is_not_null, strip_distinct), c))) ))
-        return cursor.fetchall()
+        return DD('QUERY-RESULT: ')( cursor.fetchall() )
     except AttributeError:
         Q( "No database available for query" )
         return []
@@ -435,7 +435,7 @@ def raw_query(db, q):
     try:
         cursor = db.cursor()
         cursor.execute(Q( q ))
-        return cursor.fetchall()
+        return DD('RAW-QUERY RESULT: ')( cursor.fetchall() )
     except AttributeError:
         Q( "No database available for query" )
         return []
@@ -2247,8 +2247,8 @@ class vlbish_ctx(object):
 
     def __enter__(self):
         # now need to do real work
-        # Load history, if exists
-        maybe_process_f(READLINE.read_history_file)( self.historyFile )
+        # Load history, if exists AND IF READLINE IS AVAILABLE (thanks to Oh Se-Jin of KASI)
+        maybe_process_f(lambda hf: process_f(methodcaller('read_history_file', hf))(READLINE))( self.historyFile )
         # load aliases [transform old-style alises into new-style ones] (if exist)
         maybe_process_f(partial(xform_aliases, self))( self.aliasFile )
         return self
@@ -2258,9 +2258,9 @@ class vlbish_ctx(object):
         for job in self.jobs.values():
             job.do_stop()
 
-        # attempt to save history and aliases
+        # attempt to save history and aliases IF READLINE IS AVAILABLE (thanks to Oh Se-Jin of KASI)
         try:
-            process_f(READLINE.write_history_file)( self.historyFile )
+            maybe_process_f(lambda hf: process_f(methodcaller('write_history_file', hf))(READLINE))( self.historyFile )
         except Exception as E:
             printf(self, "Failed to save history"+repr(E))
         try:
