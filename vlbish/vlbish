@@ -488,9 +488,9 @@ class YesDBManager(collections.defaultdict):
 # correlator_control: routing
 # hardware: local_flexbuff, remote_flexbuff, sfxc_node
 dbHost    = userinput.db
-dbManager = NoDBManager() if not userinput.sql else YesDBManager({'ccs'               : (dbHost, 3306), 
-                                                                  'correlator_control': (dbHost, 3306),
-                                                                  'hardware'          : (dbHost, 3306) })
+dbManager = NoDBManager() if (MYSQL is None or not userinput.sql) else YesDBManager({'ccs'               : (dbHost, 3306), 
+                                                                                     'correlator_control': (dbHost, 3306),
+                                                                                     'hardware'          : (dbHost, 3306) })
 
 
 ############################################################################################
@@ -2260,7 +2260,7 @@ class vlbish_ctx(object):
 
         # attempt to save history and aliases IF READLINE IS AVAILABLE (thanks to Oh Se-Jin of KASI)
         try:
-            maybe_process_f(lambda hf: process_f(methodcaller('write_history_file', hf))(READLINE))( self.historyFile )
+            process_f(lambda hf: process_f(methodcaller('write_history_file', hf))(READLINE))( self.historyFile )
         except Exception as E:
             printf(self, "Failed to save history"+repr(E))
         try:
