@@ -2468,8 +2468,30 @@ query_select = {
 #############################################################################################################
 
 if __name__ == '__main__':
+    ## Before doing /anything/ check to see if we are called as being an interpreter:
+    # Given:
+    #   $> cat blah.scr
+    #   #!/usr/bin/env vlbish --nosql --debug
+    #   localhost:4004/dts_id?;; sleep 2;; mode?
+    #   $> chmod +x blah.scr
+    #   $> ./blah.scr 
+    # should make vlbish run the commands in blah.scr  
+
+    # we never take a file as command line argument, unless we're asked to
+    # interprete a text file, in which case it is the final argument.
+    # In the case of blah.scr above, we're called like this:
+    #
+    #      sys.argv = ["vlbish", "--nosql", "--debug", "blah.scr"]
+    #
+    # i.e. the name of the script file is appended at the end of the command
+    # line found in the script file itself.
+    #
+    # If the last argument on the command line is '-', we read from stdin
+    if len(sys.argv)>1 and (os.path.isfile(sys.argv[-1]) or sys.argv[-1]=='-'):
+        # no history and no startup cruft
+        vlbish_main(readstdio(prompt()) if sys.argv[-1]=='-' else playfile(sys.argv[-1], []), ignorefn, printfn, None)
     # any non argument commandline arguments are taken to be vlbish commands
-    if userinput.commands:
+    elif userinput.commands:
         # no history and no startup cruft
         vlbish_main(readlist(userinput.commands), ignorefn, printfn, None)
     else:
