@@ -2,7 +2,7 @@
 #
 #   vlbish -- control local and remote (== @stations) Mark5s, FlexBuffs, FiLa10Gs, sfxc cluster nodes from one place.
 #
-#   Usage:  vlbish [options] [command [command]]
+#   Usage:  vlbish [options] [-c "command" [-c "command"] | path/to/script [arg1 arg2 ... argN]]
 #           see 'vlbish --help' for [options]
 #
 #   Options:
@@ -16,7 +16,7 @@
 #
 #   Description:
 #
-#   vlbish reads lines of input from stdin, file or command line arguments.
+#   vlbish reads lines of input from stdin, command line arguments or a script file.
 #
 #   Each line of input either sends VSI/S commands via TCP/IP to a selection of hosts,
 #   executes shell command(s) using ssh on a selection of hosts or is a vlbish built-in command. 
@@ -326,12 +326,13 @@ parsert.add_argument('--testdb', dest='db', action='store_const', default="db0.j
 parsert.add_argument('--nosql', dest='sql', action='store_false', default=True,
                     help="Do not attempt to connect to a database at all")
 parsert.add_argument('--version', action='version', version=version, help="Print current version and exit succesfully")
-parsert.add_argument("commands", nargs='*',
+parsert.add_argument('-c', dest="commands", action='append', type=str, default=list(),
                      help="Execute the commands given on the command line")
+parsert.add_argument("script", nargs='*',
+                     help="Execute the script given on the command line with optional arguments")
 
 # deal with command line
 userinput = parsert.parse_args()
-
 
 # mysql - enable lookup of eVLBI stations' ip address and a lot more stuff from the database@JIVE
 try:
@@ -2468,24 +2469,25 @@ query_select = {
 #############################################################################################################
 
 if __name__ == '__main__':
-    # Before doing /anything/ check to see if we are called as being an
-    # interpreter:
-    #   $> cat test.scr
-    #   #!/usr/bin/evn vlbishi
-    #   blaaaaaaaaah
-    #   blaah
-
-    #   $> chmod +x test.scr
-    # Now this:
-    #   $> ./test.scr
-    # causes our sys.argv to be: [".../vlbishi", "./test.scr"]
-    # so if sys.argv[0] has ".../vlbishi" in stead of ".../vlbish"
-    # we may be called to interpret sys.argv[1] as file-with-commands
-    # if we were just called as vlbishi (no arguments) then we fall back
-    # to as if vlbish was executed.
-    if os.path.basename(sys.argv[0])=="vlbishi" and len(sys.argv)>1:
+    # it is an error to specify both "-c CMD" and "<path/to/script> [<arg1> ... <argN>]
+    # I've spent QST googling + reading argparse documentation but as far as
+    # I can see it is impossible to add a mutually exclusive group with an
+    # argument as one possibility and positionals as the other.
+    #  ( this doesn't work:
+    #     x = argparse.ArgumentParser()
+    #     mtx_group = x.add_mutually_exclusive_group( required=False )
+    #     mtx_group.add_argument('-c',..., required=False);
+    #     mtx_group.add_argument("script", nargs="*", ...)
+    # error on execution:
+    #   mtx_group.add_argument("script", ...)
+    #   ValueError: mutually exclusive arguments must be optional
+    # so we fix this the stupid way, like monkeys do
+    if userinput.commands and userinput.script:
+        raise RuntimeError("The '-c' option(s) and executing a script are mutually exclusive")
+    # decide what to do
+    if userinput.script:
         # no history and no startup cruft
-        vlbish_main(playfile(sys.argv[1], sys.argv[2:]), ignorefn, printfn, None)
+        vlbish_main(playfile(userinput.script[0], userinput.script[1:]), ignorefn, printfn, None)
     # any non argument commandline arguments are taken to be vlbish commands
     elif userinput.commands:
         # no history and no startup cruft
