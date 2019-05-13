@@ -156,6 +156,12 @@
 #              filters out anything that is-a dbbc out of "..." OR transforms '...'
 #              into a dbbc (automatically sets 'stripnl' option!)
 #
+#   rdbe ...   transforms '...' into an RDBE identifier (e.g. "rdbe a,b")
+#
+#   fs   ...   resolve '...' from the FieldSystem /usr2/control/* files
+#              typically only makes sense for hardware the FS knows about:
+#                 fs dbbc/sysstat, fs rdbe a,b/rdbe_dc_cfg=0:8:42.00:0
+#
 #   dst  ...   resolves to whatever is sending to what is specified in ...
 #   src  ...   resolves to whatever has ... as source
 #
@@ -277,7 +283,10 @@ listify     = choice(is_iterable, identity, lambda x: [x])
 mk_list     = lambda *args: list(args)
 mk_tuple    = lambda *args: args
 truth_tbl   = lambda *args: tuple(map(truth, args))
-
+Filter      = lambda pred: partial(filter, pred)
+Map         = lambda fn: partial(map, fn)
+GetN        = itemgetter
+Zip         = lambda l: lambda x: zip(l, x)
 # wrap f and catch exception if "f(...)" throws. Return "eret" in that case
 def maybe_exec(f, eret):
     def try_it(*args, **kwargs):
@@ -791,7 +800,7 @@ xformmge_t = lambda tp, f: lambda o, **k: token_type(tp, f(o, **k), **k)
 #  address  = name | group
 #  name     = number | range | host | ipv4 | nodes | 'alle'
 #  group    = '(' mk5s ')' | modifier '(' mk5s ')'
-#  modifier = 'dbbc' | 'fila' | 'fb' | [cC] | [rR] | '*'
+#  modifier = 'dbbc' | 'fila' | 'fb' | [cC] | [rR] | '*' | 'rdbe' | 'fs'
 
 #  range    = number '-' number
 #  ipv4     = number '.' number '.' number '.' number
@@ -933,6 +942,7 @@ class Mk5(Resolveable):
         # Mk5 => Number
         # Mk5 => Modifier5C => Number
         # Mk5 => Station [ look up in e-VLBI Params ]
+        # Mk5 => Host == identity
         ts     = type(self.value)
         if ts in [Modifier5C, Number]:
             n      = self.value.value
@@ -940,6 +950,8 @@ class Mk5(Resolveable):
         elif ts is Station:
             # search in e-VLBI params
             result = maybe_lookup_evlbi(self.value.value)
+        elif ts is Host:
+            result = [self.value]
         return map(lambda rn: rn.update(**self.options()), result)
 
     def resolve_as_source(self):
@@ -972,6 +984,18 @@ class Number(Resolveable):
     def resolve(self):
         # We resolve to Mark5# self.value at JIVE
         return Mk5(self)
+
+# single character - for RDBE x
+class Character(Resolveable):
+    def __init__(self, character, **kwargs):
+        super(Character, self).__init__('character', character, **kwargs)
+
+    def options(self):
+        return Resolveable.options(self)
+
+    def resolve(self):
+        # We resolve to RDBE self.value at the station
+        return RDBE(self)
 
 given_experiment   = "experiment = '{0}'".format
 current_experiment = "nominal_start <= utc_timestamp() and utc_timestamp() <= nominal_stop and experiment not like '%TEST'".format
@@ -1072,6 +1096,67 @@ class FiLa(DBBC):
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=strm_cond,
                                                  record_cond=rec_cond) ))
+
+class RDBE(Resolveable):
+    def __init__(self, rdbe, **kwargs):
+        # No special processing yet
+        super(RDBE, self).__init__('rdbe', rdbe, **kwargs)
+
+    def options(self):
+        return do_update(self.value.options(), Resolveable.options(self))
+
+    def resolve(self):
+        # if we were a generic host transformed to 'rdbe' then let the contained value resolve itself
+        updatert = partial(resolved_name.update, **d_filter_n(['port'])(self.options()))
+        if type(self.value) is Host:
+            return updatert( self.value.resolve() )
+        # otherwise ... ?
+        raise RuntimeError("Named RDBEs do not resolve themselves")
+
+
+# field system control files have "*" as comment character
+# so filter any non-empty lines
+fs_ctl = compose(DD(" content"), choice(os.path.isfile,
+                        compose(Filter(re.compile("^[^ \t\*]+.*(\*|$)?").match), open),
+                        compose(const([]), DD("No such file"))),
+                 DD("CTL file"),
+                 partial(os.path.join, "/", "usr2", "control"))
+
+# several /usr2/control/*ad.ctl files follow this format:
+#   * comment
+#   * blah 
+#   <host> <port> <timeout>
+# This method gives [Host(host, port=port)] or [] if nothing found
+get_addr = compose(choice(truth,
+                    compose(lambda d:resolved_name(**d), dict, Zip(["host", "port", "timeout"]), Map(str.strip), str.split, GetN(0)),
+                    const([])), fs_ctl)
+
+class FieldSystem(Resolveable):
+    def __init__(self, hw, **kwargs):
+        # No special processing yet
+        super(FieldSystem, self).__init__('fieldsystem', hw, **kwargs)
+
+    def options(self):
+        return do_update(self.value.options(), Resolveable.options(self))
+
+    def resolve(self):
+        updatert = partial(resolved_name.update, **d_filter_n(['port'])(self.options()))
+        # look in /usr2/control ..
+        if type(self.value) is Mk5:
+            return map(updatert, get_addr("mk5ad.ctl"))
+        if type(self.value) in [DBBC, FiLa]:
+            return map(updatert, get_addr("dbbad.ctl"))
+        if type(self.value) is RDBE:
+            rdbe = self.value
+            if type(rdbe.value) is Host:
+                return rdbe.value
+            if type(rdbe.value) is Character:
+                # assume "rdbe X", look up /usr2/fs/control/rdbex
+                rdbectl = fs_ctl("rdbe"+rdbe.value.value.lower())
+            return None
+        # otherwise ... ?
+        raise RuntimeError("FieldSystem error")
+
 
 class UnknownDataSource(Resolveable):
     def __init__(self, station, **kwargs):
@@ -1195,6 +1280,7 @@ def get_receiver(row):
 
 
 fb_name = choice(compose(partial(is_, Number), type), compose("flexbuf{0}".format, attrgetter('value')), attrgetter('value'))
+
 class FlexBuff(Resolveable):
     def __init__(self, fb, **kwargs):
         super(FlexBuff, self).__init__('flexbuff', fb, **kwargs)
@@ -1344,14 +1430,44 @@ class ModifierMk5(Resolveable):
     #    mk5 <number>       [mk5 @JIVE]
     #    mk5 <station>      [mk5 @station]
     #    mk5 <mk5|...>      [act as filter/only let pass type mk5]
-    modifyable_types = [ Station, Number, Mk5 ]
+    #    mk5 <host>         [transform into Mk5]
+    modifyable_types = [ Station, Number, Mk5, Host]
     @staticmethod
     def modify(item):
-        if type(item) in [Station, Number]:
+        if type(item) in [Station, Number, Host]:
             return Mk5(item)
         if type(item) is Mk5:
             return item
         return []
+
+class ModifierRDBE(Resolveable):
+    def __init__(self, item, **kwargs):
+        super(ModifierRDBE, self).__init__('rdbe', item, **kwargs)
+
+    # rdbe modifier can be
+    #    rdbe <character>   [rdbe @station]
+    #    rdbe <host>        [transforms host into rdbe type]
+    #    rdbe <mk5|...>     [act as filter/only let pass type rdbe]
+    modifyable_types = [ Host, Character, RDBE ]
+    @staticmethod
+    def modify(item):
+        if type(item) in [Host, Character]:
+            return RDBE(item)
+        if type(item) is RDBE:
+            return item
+        return []
+
+class ModifierFieldSystem(Resolveable):
+    def __init__(self, item, **kwargs):
+        super(ModifierFieldSystem, self).__init__('fs', item, **kwargs)
+
+    # fs modifier can modify the following FieldSystem components
+    #    fs <rdbe>    to go resolve the symbolic RDBE in the FS config
+    #    fs <mk5>     id. for the Mark5
+    modifyable_types = [ RDBE, Mk5, DBBC, FiLa ]
+    @staticmethod
+    def modify(item):
+        return FieldSystem(item)
 
 class ModifierFiLa(Resolveable):
     def __init__(self, item, **kwargs):
@@ -1475,10 +1591,11 @@ def mk_mapping_maker(m):
     return do_make
 
 is_e_station = compose(partial(query, dbManager.get('ccs'), ["e_station_name"], "eVLBI_Params"), "e_station_name='{0}'".format)
-def host_or_station(token, **kwargs):
+#def host_or_station(token, **kwargs):
+    #return choice(is_e_station, Station, Host)(token).update( **kwargs )
+def host_or_station_or_char(token, **kwargs):
     # check if token was a valid station name
-    return choice(is_e_station, Station, Host)(token).update( **kwargs )
-    
+    return choice(is_e_station, Station, choice(compose(partial(eq, 1),len), Character, Host))(token).update( **kwargs )
 
 ops = { 'c':    mk_reduce_modifier(Modifier5C),
         'r':    mk_reduce_modifier(ModifierRemote),
@@ -1488,7 +1605,9 @@ ops = { 'c':    mk_reduce_modifier(Modifier5C),
         'dst':  mk_reduce_modifier(ModifierDST),
         'src':  mk_reduce_modifier(ModifierSRC),
         'fila': mk_reduce_modifier(ModifierFiLa),
-        'dbbc': mk_reduce_modifier(ModifierDBBC) }
+        'dbbc': mk_reduce_modifier(ModifierDBBC),
+        'rdbe': mk_reduce_modifier(ModifierRDBE),
+        'fs'  : mk_reduce_modifier(ModifierFieldSystem)}
 def get_modifier(which):
     return ops[which.lower()]
 
@@ -1720,7 +1839,7 @@ class Mk5Parser(object):
         token_def(r"\balle(\(([0-9]+)\)|\b)",            xformmg_t('stations', expand_alle)),     # dynamically evaluated
         token_def(r"\bstations(\(([0-9]+)\)|\b)",        xformmg_t('stations', expand_stations)), # dynamically evaluated
         token_def(r"\bany\b",                            const_t('number', -1)),
-        token_def(r"(\b(fila|dbbc|fb|mk5|src|dst|[cCrR])\b|\*)",
+        token_def(r"(\b(fila|dbbc|fb|mk5|src|dst|[cCrR])\b|\*|fs|rdbe)",
                                                          xform_t('modifier', get_modifier)), # modifier
         token_def(r"\b\d+(\.\d+){3}\b",                  value_t('ipv4')),                   # ipv4 dotted decimal
         # sfxc nodes :-)
@@ -1749,7 +1868,7 @@ class Mk5Parser(object):
             'range'   : mk_mapping_maker(Number), 
             'nodes'   : mk_mapping_maker(Node),
             'ipv4'    : Host,
-            'text'    : host_or_station #Station
+            'text'    : host_or_station_or_char #host_or_station #Station
     }
 
 
@@ -1816,7 +1935,8 @@ class Mk5Parser(object):
             # We did not find an addressee yet. So at this point we
             # *must* be looking at text?
             if tok_tp(s) is not 'text':
-                s.syntax_error( "Unexpected token {0}, expect an address here".format(tok(s)) )
+                s.syntax_error( "Unexpected token {0}, expect an address here{1}".format(
+                    tok(s), " [note: there are modifiers in action!]" if modifiers else "") )
 
             # not entirely obvious what we're looking at yet:
             #   text '@' addressee   {user prefix}
@@ -1860,7 +1980,7 @@ class Mk5Parser(object):
     #  name      = number | range | host | ipv4 | nodes | 'alle' | job
     #  job       = 'job' { '(' number ')' }
     #  modifiers = modifier , { modifiers }
-    #  modifier  = 'c' | 'C' | '*' | 'r' | 'R' | 'fila' | 'fb' | 'dbbc'
+    #  modifier  = 'c' | 'C' | '*' | 'r' | 'R' | 'fila' | 'fb' | 'dbbc' | 'fs' | 'rdbe'
     #  group     = '(' mk5s ')' 
     def parse_address(self, s, default_port):
         # someone believes we must be looking at name | group
@@ -2181,7 +2301,7 @@ def playfile(fn, args):
             if len(line):
                 yield line.rstrip('\n').format(*args)
     except IOError, msg:
-        print "{0}: {1}".format(file, msg)
+        print "{0}: {1}".format(fn, msg)
     except EOFError:
         raise StopIteration
 
