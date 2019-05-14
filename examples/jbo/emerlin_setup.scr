@@ -1,0 +1,34 @@
+# In this script we define the setup:
+#   provide aliases for all e-MERLIN outstations
+#   in which particulars for that station are encoded:
+#      - the runtime name
+#      - the UDP port from which to record for that station
+#
+#  It is possible to drive multiple recorders from here - 
+#  I've defined an example fake one below
+
+# Define an alias for the actual flexbuff IP + PORT where the recording
+# jive5ab is running.
+# This is to make switching to recording on a different flexbuff easy
+# by just changing to different host name or IP name and/or PORT ...
+alias recorder  flexbuf3:2620
+
+# Now define aliases for all of the outstations. By setting the runtime=XXX 
+# key it makes vlbish automatically prepend the commands with "runtime=XXX;" 
+#
+# Make sure YYY is set to the UDP port number from which that one should record.
+#
+# By changing the "recorder" to "IP:PORT" it is possible to make that
+# station record on a different flexbuff (jive5ab must be running on IP and
+# listening on PORT for commands). See fake below.
+alias da      (recorder, runtime=Da, net_port=YYY)
+alias de      (recorder, runtime=De, net_port=YYY)
+alias cm      (recorder, runtime=Cm, net_port=YYY)
+alias kn      (recorder, runtime=Kn, net_port=YYY)
+alias ta      (recorder, runtime=Ta, net_port=YYY)
+# shorthand for all e-MERLIN outstations
+alias emerlin (da, de, cm, kn, ta)
+
+# By just replacing the 'recorder' with something else
+# you'd make that station be recorded on a different machine
+#alias fake  (mymacbook.jive.nl:4004, runtime=fake, net_port=YYY)

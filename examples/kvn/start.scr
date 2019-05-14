@@ -1,0 +1,18 @@
+# Take one argument: the scan (base)name 
+
+# 1. read the setup
+play setup.scr
+
+# 2. configure the receivers
+#    You can change the VDIF mode/mtu etc., the net_port will be filled in from
+#    what was defined in each stream's setup.
+receivers/net_protocol=udpsnor:32M:256M:4; net_port={{net_port}}; mtu=9000; mode=VDIF_4000-128-8-2
+# receivers/set_disks=...      # if you want to change/set specific disks on which to record
+#                              # see the jive5ab documentation
+#                              # http://www.jive.eu/~verkout/evlbi/jive5ab-documentation-1.7.pdf
+
+# 3. start all recorders and append a suffix to the recording so we can tell them apart
+#    Takes the 'stream_id' suffix from the recorder definition (see "setup.scr")
+#    Note: The string '{0}' means "replace with the script's first argument"
+#          (so "{1}" would be the 2nd argument etc., see vlbish usage/help)
+receivers/record=on:{0}@{{stream_id}} 

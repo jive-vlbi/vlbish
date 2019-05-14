@@ -1,0 +1,14 @@
+#!/usr/bin/env vlbish
+# Stop the recording for the given stations.
+#
+# Usage:
+#   play emerlin_stop.scr <stations>
+# where <stations> is the same form the 3rd argument to "emerlin_start.scr"
+
+# 1. read the setup
+play emerlin_setup.scr
+
+# 2. issue record=off to all recorders, then sleep for a bit and then issue
+#    a scan_check. (If you don't want any of these just comment or edit out.
+#    Note: the double semicolons here are *absolutely* necessary, see "vlbish --usage"
+{0}/record=off;; sleep 2;; scan_check?;

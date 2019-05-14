@@ -1,0 +1,37 @@
+#!/usr/bin/env vlbish
+# Start recording e-MERLIN outstations, automatically generating the correct
+# recording name
+#
+# Usage:
+#   play emerlin_record.scr <experiment> <scan> <outstations>
+#                           {0}          {1}    {2}           
+#                       note: field id for substitution below
+# where:
+#   <experiment>     experiment id, eg: n18c1
+#   <scan>           scan id,       eg: no0001
+#   <outstations>    comma-separated list of outstations to record, eg:
+#                       cm,ta,de
+#                    or use the shortcut "emerlin" for "all outstations"
+#                    (see "emerlin_setup.scr")
+
+# 1. read the setup
+play emerlin_setup.scr
+
+# 2. configure the receivers (the 3rd argument to the script) You can change
+#    the net_protocol, VDIF mode, mtu etc., the net_port will be filled in from
+#    what was defined in each stream's setup. The runtime which will be
+#    configured will be automagically filled in by vlbish from the aliases so
+#    no need to worry about that here
+{2}/net_protocol=pudp:32M:256M:4; net_port={{net_port}}; mtu=9000; mode=VDIF_8000-128-8-2
+# of course you can send other commands to all recorders:
+# {2}/set_disks=...      # if you want to change/set specific disks on which to record
+#                        # see the jive5ab documentation
+#                        # http://www.jive.eu/~verkout/evlbi/jive5ab-documentation-1.9.pdf
+
+# 3. start all recorders and let it generate the appropriate recording name
+#    based on experiment, scan and actual station to form the standard name:
+#    EXP_STATION_SCAN
+#    We re-use the runtime name in the recording name. If so desired this 
+#    can be changed by adding a different "key=value" to the station's
+#    aliases in "emerlin_setup.scr" and substituting "key" for "runtime" in here
+{2}/record=on:{0}_{{runtime}}_{1} 

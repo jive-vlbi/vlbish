@@ -1,0 +1,22 @@
+# In this script we define the setup:
+#   where is jive5ab running
+#   which streams it should be recording
+
+# IPn[:PORTn]   = the IP:PORT of the jive5ab which should be recording that stream.
+#                 PORTn defaults to 2620, jive5ab's default command port.
+#                 (IPn does not have to be identical for each stream, so, yes,
+#                  you can drive multiple recorders as well, if you really want to ...)
+# net_port=XXX  = the UDP port number from which that stream should be recorded
+# stream_id=SSS = which suffix to append to the scan label when this
+#                 particular stream is recorded
+# runtime=RRR   = this is jive5ab internal
+#
+# Make sure that the XXX's, RRR's and SSS's are unique; otherwise you'll
+# have two recordings trying to record the same stream or into the same
+# recording on disk
+alias stream0 (IPn[:PORTn],net_port=XXX,runtime=strm0,stream_id=0)
+alias stream1 (IPn[:PORTn],net_port=XXX,runtime=strm1,stream_id=1)
+# you can add more streams if you want to
+
+# Define an alias which encompasses all streams you want to record
+alias receivers stream0,stream1

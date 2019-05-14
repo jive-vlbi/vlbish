@@ -1,0 +1,56 @@
+# Test FiLa10G cornerturning, send two threads to different destinations
+# Take one argument: the scan (base)name
+
+# configure some receiving jive5ab's. They'll be programmed to record from the
+# set net_port.
+alias thread0 (192.42.120.39:4000,net_port=4001)
+alias thread1 (192.42.120.39:4002,net_port=4003)
+alias receivers thread0,thread1
+
+# define sending f10g. can also use "(fila 192.168.1.10:4000)"
+# set "eth=X" where X is the port sending.
+# note: set "dest0=XXX" and "dest1=YYY" to match the receiver(s) above ...
+#       need to use double "\" to prevent the (somewhat stupid) vlbish
+#       parser from interpreting the IPv4 address as syntactic token
+#       - because it knows about dotted-quad IP addresses in the syntax -
+#       as we need to pass it on a string attribute here and not as semantic
+#       element
+alias sender (fila ys,eth=1,dest0=\\192.42.120.39:4001,dest1=\\192.42.120.39:4003)
+
+# Cut+pasted from Ys f10g FS config file, modified to take a parameter from "sender"
+# Note: need the double "{" and "}" because the vlbish script reader strips
+#       the first layer of "{ ... }" (each line is called as
+#       'line.format(...)') and then the vsi_s caller must substitute the
+#       value of the "eth" property of "sender"
+sender/tengbcfg eth{{eth}} ip=193.146.252.21 gateway=193.146.252.1
+sender/tengbcfg eth{{eth}} mac=00:60:dd:45:66:79
+sender/tengbcfg eth{{eth}} nm=27
+sender/tengbarp eth{{eth}} 1 00:1c:2e:92:26:40
+
+sender/inputselect tvg
+sender/tvg_samplerate 8000000  # not too much data for now
+sender/vsi_inputwidth 32       # 32 bits x 8MHz = 256Mbps 
+sender/vdif_frame 2 8 4000     # here we make it cornerturn into two threads!
+                               # apparently 8..4096 is valid frame sizes for
+                               # this cornerturning mode
+sender/destination {{eth}} {{dest0}} 0   # program the destination(s) for the thread(s)
+sender/destination {{eth}} {{dest1}} 1
+
+# configure+start the receivers
+receivers/net_protocol=udps:32M:256M:4; net_port={{net_port}}; mtu=9000; mode=VDIF_4000-128-8-2
+receivers/record=on:{0}-{{net_port}}      # append a suffix to the recording so we can tell them apart
+
+# now start the f10g
+sender/start vdif
+
+# start background job to see what the receivers are receiving
+repeat=2,receivers/tstat?; evlbi?;
+
+# let it run for some time, then kill the background job (let's hope it *is*
+# job 0, if you're not running anything else ...)
+sleep 20
+kill 0
+
+# and tear down
+sender/stop
+receivers/record=off;; sleep 2;; scan_check?;

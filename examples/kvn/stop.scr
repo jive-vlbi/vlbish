@@ -1,0 +1,8 @@
+# Stop all recorders that are defined in the setup and perform a scancheck
+
+# 1. read the setup
+play setup.scr
+
+# 2. issue record=off to all recorders, then sleep for a bit and then issue
+#    a scan_check. (If you don't want any of these just comment or edit out
+receivers/record=off;; sleep 2;; scan_check?;
