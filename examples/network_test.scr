@@ -5,7 +5,15 @@ alias sender   (192.168.254.200, runtime=network_test)
 alias receiver (192.168.254.44, runtime=network_test)
 
 # configure the network setup: network protocol &cet
-sender, receiver/net_protocol=udp; net_port=46227; mode=none;
+# Play with MTU as long as the value <= total link MTU
+sender, receiver/net_protocol=udp; net_port=46227; mode=none; mtu=4400;
+
+# for UDP based protocols
+# - pudp (plain-UDP)
+# - udps (UDP-with-sequence number)
+# this parameter determines the interpacket delay.
+# See jive5ab manual for "ipd="
+#sender/ipd=60
 
 # the receiver will discard the data to /dev/null
 receiver/net2file=open:/dev/null,w
@@ -14,7 +22,8 @@ receiver/net2file=open:/dev/null,w
 sender/fill2net=connect:192.168.254.44
 sender/fill2net=on:-1
 
-# Start background job to monitor and let it run for some time
+# Start background job to monitor and let it run for some time, displaying
+# stats every 10 seconds
 repeat=10,sender,receiver/tstat?; evlbi?;
 
 sleep 30
