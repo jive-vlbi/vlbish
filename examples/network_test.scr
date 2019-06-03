@@ -1,0 +1,24 @@
+# Purpose: do a network test between two jive5ab's
+
+# define sender + receiver 
+alias sender   (192.168.254.200, runtime=network_test)
+alias receiver (192.168.254.44, runtime=network_test)
+
+# configure the network setup: network protocol &cet
+sender, receiver/net_protocol=udp; net_port=46227; mode=none;
+
+# the receiver will discard the data to /dev/null
+receiver/net2file=open:/dev/null,w
+
+# tell the sender to connect to the receiver and then to turn on the dataflow
+sender/fill2net=connect:192.168.254.44
+sender/fill2net=on:-1
+
+# Start background job to monitor and let it run for some time
+repeat=10,sender,receiver/tstat?; evlbi?;
+
+sleep 30
+
+# stop the transfer
+sender/fill2net=disconnect
+receiver/net2file=close
