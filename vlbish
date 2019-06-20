@@ -2087,9 +2087,9 @@ class Mk5Parser(object):
         if not self.isIdentifier(key):
             s.syntax_error("Option key '{0}' is not a valid alphanumeric identifier".format( key ))
         next(s)
-        # collect all tokens that are 'text', 'number', 'float' or ':'
+        # collect all tokens that are 'text', 'number', 'float', 'ipv4' or ':'
         value = ""
-        while tok_tp(s) in ['text', 'number', 'float', 'colon']:
+        while tok_tp(s) in ['text', 'number', 'float', 'colon', 'ipv4']:
             value = value + (str(tok_val(s)) if tok_tp(s) is not 'colon' else ':')
             next(s)
         if not value:
