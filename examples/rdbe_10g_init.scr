@@ -1,0 +1,61 @@
+# Initialize the RDBE 10G core's parameters and ARP table for Arecibo
+# Take one argument: which rdbes to initialize as comma separated list:
+#   rdbe_10g_init.scr rdbe1,rdbe2
+
+# For each of the RDBEs configure the 10G core's IPv4 address and MAC
+# Note: * the Mark6 eth4..7 have 192.168.1.[2..5]
+#       * the RDBEs are directly connected:
+#           rdbe1 -> Mark6  eth7
+#           rdbe2 -> Mark6  eth6
+#           rdbe3 -> Mark5C no eth/IPv4 because 5C don't look at that
+#                    but put in some unroutable IPv4 so we might tell
+#           So we program the proper destination for each RDBE as well
+alias rdbe1 (rdbe 192.168.4.14:5000,ip=192.168.1.100,mac=aa.bb.cc.dd.ee.01,dest=192.168.1.5)
+alias rdbe2 (rdbe 192.168.4.12:5000,ip=192.168.1.101,mac=aa.bb.cc.dd.ee.02,dest=192.168.1.4)
+alias rdbe3 (rdbe 192.168.4.10:5000,ip=192.168.1.102,mac=aa.bb.cc.dd.ee.03,dest=10.0.0.10)
+alias rdbe4 (rdbe 192.168.4.16:5000,ip=192.168.1.103,mac=aa.bb.cc.dd.ee.04,dest=0.0.0.0)
+
+############################### NOTE ##############################
+#    When changing/adding rdbe_server commands
+#    below, be SURE to terminate them with ';'!
+#    Otherwise the rdbe_server program sais
+#    "syntax error" ...
+#
+#    A future vlbish will, if a host has been marked
+#    as 'rdbe' ("rdbe <ip>|<host>") automatically do
+#    this for you.
+###################################################################
+
+
+# Step one: disable the 10G core
+# Note: the rdbe_server only accepts the command if all the arguments are
+#       given *sigh*. And not just that, they have to be *valid* values at
+#       that *resigh*
+{0}/dbe_ifconfig=down:1500:4:0.0.0.0:0.0.0.0;
+sleep 1
+
+# Step two: set the 10G eth MAC address and bring the interfaces up
+#           with their appropriate settings
+{0}/dbe_mac={{mac}};
+{0}/dbe_ifconfig=up:9000:4:{{ip}}:192.168.1.1;
+sleep 1
+
+# Step three: put the Mark6 IPv4 <-> MAC address table into each RDBE.
+# The current table was built like this:
+#   root@Mark6-4XXX:# /sbin/ifconfig -a | sed -n '/^eth[4567]/p;/inet addr/p'
+#   eth4      Link encap:Ethernet  HWaddr 00:60:dd:42:ea:c8
+#             inet addr:192.168.1.2  Bcast:192.168.1.255  Mask:255.255.255.0
+#   eth5      Link encap:Ethernet  HWaddr 00:60:dd:42:ea:c9
+#             inet addr:192.168.1.3  Bcast:192.168.1.255  Mask:255.255.255.0
+#   eth6      Link encap:Ethernet  HWaddr 00:60:dd:45:75:b2
+#             inet addr:192.168.1.4  Bcast:192.168.1.255  Mask:255.255.255.0
+#   eth7      Link encap:Ethernet  HWaddr 00:60:dd:45:75:b3
+#            inet addr:192.168.1.5  Bcast:192.168.1.255  Mask:255.255.255.0
+{0}/dbe_arp=force:192.168.1.2:00.60.dd.42.ea.c8;
+{0}/dbe_arp=force:192.168.1.3:00.60.dd.42.ea.c9;
+{0}/dbe_arp=force:192.168.1.4:00.60.dd.45.75.b2;
+{0}/dbe_arp=force:192.168.1.5:00.60.dd.45.75.b3;
+sleep 1
+
+# Step four: program the default data destination in each RDBE
+{0}/dbe_data_connect={{dest}};
