@@ -290,6 +290,7 @@ Filter      = lambda pred: partial(filter, pred)
 Map         = lambda fn: partial(map, fn)
 GetN        = itemgetter
 Zip         = lambda l: lambda x: zip(l, x)
+Enumerate   = lambda n=0: lambda l: enumerate(l, n)
 # wrap f and catch exception if "f(...)" throws. Return "eret" in that case
 def maybe_exec(f, eret):
     def try_it(*args, **kwargs):
@@ -2313,14 +2314,17 @@ def xform_aliases(env, afn):
 # note that we first partition the string into a part before comment, '#' and after the comment
 linesplit = compose(re.compile(r'\s*;;+\s*').split, itemgetter(0), methodcaller('partition', '#'))
 cleanup   = compose(str.strip, partial(re.compile(r'\s+;\s+').sub, ';'), partial(re.compile(r'^\s*;\s*').sub, ''))
-
+get_lines = compose(Filter(GetN(1)), Enumerate(1), Map(compose(GetN(0), Map(str.strip), methodcaller('split', '#'))), open)
 def playfile(fn, args):
     try:
-        for line in open(fn):
-            if len(line):
-                yield line.rstrip('\n').format(*args)
+        for (n, line) in get_lines(fn):
+            yield line.format(*args)
+    except KeyError, msg:
+        print "{0}:{1} Attempt to substitute key {2} - either use double {{ }} in the script or nothing".format(fn, n, msg)
+    except IndexError:
+        print "{0}:{1} Not enough arguments passed to script".format(fn, n)
     except IOError, msg:
-        print "{0}: {1}".format(fn, msg)
+        print "{0}:{1} {2}".format(fn, n, msg)
     except EOFError:
         raise StopIteration
 
