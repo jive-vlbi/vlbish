@@ -269,6 +269,9 @@ maybe_set   = lambda a, v          : choice(const(is_not_none(v)), setattr_(a, v
 identity    = lambda x, *a, **kw   : x
 mk_query    = lambda c, t, w, *args: "SELECT {0} FROM {1} WHERE {2}{3}".format(c, t, w, "" if not args else " and "+args[0])
 do_update   = lambda x, y          : x.update(y) or x
+hasitem_    = lambda n             : methodcaller('__contains__', n)
+setitem_    = lambda n, v          : lambda o: setitem(o, n, v) or o
+if_missing  = lambda n, v          : choice(hasitem_(n), identity, setitem_(n, v))
 d_filter    = lambda keys          : (lambda d: dict(((k,v) for k,v in d.iteritems() if k in keys)))
 d_filter_n  = lambda keys          : (lambda d: dict(((k,v) for k,v in d.iteritems() if k not in keys)))
 printf      = lambda x, y : x.printfn(y)
@@ -2099,9 +2102,9 @@ class Mk5Parser(object):
         if not self.isIdentifier(key):
             s.syntax_error("Option key '{0}' is not a valid alphanumeric identifier".format( key ))
         next(s)
-        # collect all tokens that are 'text', 'number', 'float' or ':'
+        # collect all tokens that are 'text', 'number', 'float', 'ipv4' or ':'
         value = ""
-        while tok_tp(s) in ['text', 'number', 'float', 'colon']:
+        while tok_tp(s) in ['text', 'number', 'float', 'colon', 'ipv4']:
             value = value + (str(tok_val(s)) if tok_tp(s) is not 'colon' else ':')
             next(s)
         if not value:
