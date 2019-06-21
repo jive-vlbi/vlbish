@@ -1099,7 +1099,8 @@ class FiLa(DBBC):
 
 class RDBE(Resolveable):
     def __init__(self, rdbe, **kwargs):
-        # No special processing yet
+        # automatically set 'rdbe=True' flag
+        kwargs.update(rdbe=True)
         super(RDBE, self).__init__('rdbe', rdbe, **kwargs)
 
     def options(self):
@@ -1117,7 +1118,7 @@ class RDBE(Resolveable):
 # field system control files have "*" as comment character
 # so filter any non-empty lines
 fs_ctl = compose(DD(" content"), choice(os.path.isfile,
-                        compose(Filter(re.compile("^[^ \t\*]+.*(\*|$)?").match), open),
+                        compose(Filter(re.compile("^\s*[^\*]+.*(\*|$)?").match), open),
                         compose(const([]), DD("No such file"))),
                  DD("CTL file"),
                  partial(os.path.join, "/", "usr2", "control"))
@@ -1127,9 +1128,16 @@ fs_ctl = compose(DD(" content"), choice(os.path.isfile,
 #   * blah 
 #   <host> <port> <timeout>
 # This method gives [Host(host, port=port)] or [] if nothing found
-get_addr = compose(choice(truth,
-                    compose(lambda d:resolved_name(**d), dict, Zip(["host", "port", "timeout"]), Map(str.strip), str.split, GetN(0)),
-                    const([])), fs_ctl)
+get_addr = compose(Map(compose(lambda d:resolved_name(**d), dict, Zip(["host", "port", "timeout"]), Map(str.strip), str.split)),fs_ctl)
+
+# /usr2/control/rdbead.ctl (if exists) has one or more lines like:
+#  RDBEn <addr>
+# So: extract the non-comment lines from rdbead.ctl, match them agains RDBEn (the one we're looking for)
+#     filter out the matching ones and transform each to a resolved name with only host
+# Thus: returns empty list if no matching RDBE can be found
+get_rdbe = lambda n: compose(Map(compose(lambda h:resolved_name(host=h), methodcaller('group', 1))),
+                     Filter(truth), Map(re.compile("^\s*rdbe{0}\s+(\S+)".format(n), re.I).match))\
+                     (fs_ctl("rdbead.ctl"))
 
 class FieldSystem(Resolveable):
     def __init__(self, hw, **kwargs):
@@ -1140,19 +1148,22 @@ class FieldSystem(Resolveable):
         return do_update(self.value.options(), Resolveable.options(self))
 
     def resolve(self):
-        updatert = partial(resolved_name.update, **d_filter_n(['port'])(self.options()))
+        updatert = partial(resolved_name.update, **self.options())
         # look in /usr2/control ..
         if type(self.value) is Mk5:
             return map(updatert, get_addr("mk5ad.ctl"))
         if type(self.value) in [DBBC, FiLa]:
             return map(updatert, get_addr("dbbad.ctl"))
         if type(self.value) is RDBE:
-            rdbe = self.value
+            rdbe   = self.value
             if type(rdbe.value) is Host:
                 return rdbe.value
             if type(rdbe.value) is Character:
                 # assume "rdbe X", look up /usr2/fs/control/rdbex
                 rdbectl = fs_ctl("rdbe"+rdbe.value.value.lower())
+            if type(rdbe.value) is Number:
+                # rdbe n => look in /usr2/control/rdbead.ctl for line "RDBEn <addr>"
+                return map(updatert, get_rdbe(rdbe.value.value))
             return None
         # otherwise ... ?
         raise RuntimeError("FieldSystem error")
@@ -1447,11 +1458,12 @@ class ModifierRDBE(Resolveable):
     # rdbe modifier can be
     #    rdbe <character>   [rdbe @station]
     #    rdbe <host>        [transforms host into rdbe type]
+    #    rdbe <number>      [RDBEn from fs /usr2/control/rdbead.ctl]
     #    rdbe <mk5|...>     [act as filter/only let pass type rdbe]
-    modifyable_types = [ Host, Character, RDBE ]
+    modifyable_types = [ Host, Character, RDBE, Number ]
     @staticmethod
     def modify(item):
-        if type(item) in [Host, Character]:
+        if type(item) in [Host, Character, Number]:
             return RDBE(item)
         if type(item) is RDBE:
             return item
@@ -1839,7 +1851,7 @@ class Mk5Parser(object):
         token_def(r"\balle(\(([0-9]+)\)|\b)",            xformmg_t('stations', expand_alle)),     # dynamically evaluated
         token_def(r"\bstations(\(([0-9]+)\)|\b)",        xformmg_t('stations', expand_stations)), # dynamically evaluated
         token_def(r"\bany\b",                            const_t('number', -1)),
-        token_def(r"(\b(fila|dbbc|fb|mk5|src|dst|[cCrR])\b|\*|fs|rdbe)",
+        token_def(r"(\b(fila|dbbc|fb|mk5|src|dst|[cCrR]|fs|rdbe)\b|\*)",
                                                          xform_t('modifier', get_modifier)), # modifier
         token_def(r"\b\d+(\.\d+){3}\b",                  value_t('ipv4')),                   # ipv4 dotted decimal
         # sfxc nodes :-)
@@ -2108,12 +2120,13 @@ is_a_false        = partial(contains, [False, 'false', 'False', None])
 maybe_bool        = choice(is_a_true, const(True), choice(is_a_false, const(False), const(None)))
 to_bool           = try_cvt(maybe_bool, RuntimeError("Not a boolean"))
 need_stripnl      = compose(to_bool, maybe_get('stripnl', False))
+need_semicolon    = compose(to_bool, maybe_get('rdbe', False))
 need_fila         = compose(to_bool, maybe_get('fila', False))
 maybe_get_runtime = maybe_get('runtime')
 maybe_repeat      = maybe_get('repeat')
 have_timeout      = compose(choice(is_not_none, float, const(None)), maybe_get('timeout'))
 crlf2nul          = partial(re.compile(r'[\r\n]*$').sub, r'\0')    # replace end-of-line with NUL (for FiLa10G/DBBC)
-add_semicolon     = partial(re.compile(r'([^;])$').sub, r'\1;')    # add semicolon if none present
+add_semicolon     = compose(partial(re.compile(r'([^;])$').sub, r'\1;'), str.strip)    # add semicolon if none present
 add_crlf          = partial(re.compile(r'$').sub, r'\r\n')         # add newline if none present
 
 
@@ -2185,7 +2198,7 @@ def do_vsi_s(env, ip, port, timeout, cmd):
 def vsi_s(env, todo):
     (address, cmd) = todo
     have_to   = have_timeout(address)
-    terminate = crlf2nul if need_stripnl(address) else add_crlf
+    terminate = crlf2nul if need_stripnl(address) else (add_semicolon if need_semicolon(address) else add_crlf)
     add_fila  = "fila10g={0}".format if need_fila(address) else identity
     runtime   = maybe_get_runtime(address)
     add_rt    = ("runtime={0};{{0}}".format(runtime)).format if runtime else identity
