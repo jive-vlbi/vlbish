@@ -2198,7 +2198,7 @@ def do_vsi_s(env, ip, port, timeout, cmd):
     except socket.timeout:
         rv = "Woopsy - got a timeout"
     # strip newline
-    printf(env, "{0}:{1}/{2}".format(ip, port, rv.strip("\n\r")))
+    collectf(env, "{0}:{1}/{2}".format(ip, port, rv.strip("\n\r")))
     return env
 
 def vsi_s(env, todo):
