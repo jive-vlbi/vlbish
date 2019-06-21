@@ -2129,8 +2129,11 @@ maybe_get_runtime = maybe_get('runtime')
 maybe_repeat      = maybe_get('repeat')
 have_timeout      = compose(choice(is_not_none, float, const(None)), maybe_get('timeout'))
 crlf2nul          = partial(re.compile(r'[\r\n]*$').sub, r'\0')    # replace end-of-line with NUL (for FiLa10G/DBBC)
-add_semicolon     = compose(partial(re.compile(r'([^;])$').sub, r'\1;'), str.strip)    # add semicolon if none present
 add_crlf          = partial(re.compile(r'$').sub, r'\r\n')         # add newline if none present
+# *GODVERDOMME* The effing rdbe_server /insists/ on having BOTH a semicolon AND a crlf!!!
+#  - without ';' it sais "syntax error"
+#  - without newline it just sits there waiting and never replying FFS!
+add_semicolon     = compose(add_crlf, partial(re.compile(r'([^;])$').sub, r'\1;'), str.strip)    # add semicolon if none present
 
 
 def thread_exec(f):
