@@ -5,15 +5,17 @@
 # For each of the RDBEs configure the 10G core's IPv4 address and MAC
 # Note: * the Mark6 eth4..7 have 192.168.1.[2..5]
 #       * the RDBEs are directly connected:
-#           rdbe1 -> Mark6  eth7
+#           rdbe1 -> *kaput* 
 #           rdbe2 -> Mark6  eth6
 #           rdbe3 -> Mark5C no eth/IPv4 because 5C don't look at that
 #                    but put in some unroutable IPv4 so we might tell
+#           rdbe4 -> Mark6  eth7
 #           So we program the proper destination for each RDBE as well
-alias rdbe1 (rdbe 192.168.4.14:5000,ip=192.168.1.100,mac=aa.bb.cc.dd.ee.01,dest=192.168.1.5,timeout=0.1)
-alias rdbe2 (rdbe 192.168.4.12:5000,ip=192.168.1.101,mac=aa.bb.cc.dd.ee.02,dest=192.168.1.4,timeout=0.1)
-alias rdbe3 (rdbe 192.168.4.10:5000,ip=192.168.1.102,mac=aa.bb.cc.dd.ee.03,dest=10.0.0.10,timeout=0.1)
-alias rdbe4 (rdbe 192.168.4.16:5000,ip=192.168.1.103,mac=aa.bb.cc.dd.ee.04,dest=0.0.0.0,timeout=0.1)
+alias rdbe1 (rdbe 192.168.4.14:5000,ip=192.168.1.100,mac=aa.bb.cc.dd.ee.01,dest=0.0.0.0,timeout=0.1,tsys=disenable)
+alias rdbe2 (rdbe 192.168.4.12:5000,ip=192.168.1.101,mac=aa.bb.cc.dd.ee.02,dest=192.168.1.4,timeout=0.1,tsys=enable:239.0.2.34:20021:5)
+alias rdbe3 (rdbe 192.168.4.10:5000,ip=192.168.1.102,mac=aa.bb.cc.dd.ee.03,dest=10.0.0.10,timeout=0.1,tsys=disable)
+alias rdbe4 (rdbe 192.168.4.16:5000,ip=192.168.1.103,mac=aa.bb.cc.dd.ee.04,dest=192.168.1.5,timeout=0.1,tsys=enable:239.0.2.35:20021:5)
+alias allrdbe rdbe1,rdbe2,rdbe3,rdbe4
 
 ############################### NOTE ##############################
 #    When changing/adding rdbe_server commands
@@ -34,9 +36,11 @@ alias rdbe4 (rdbe 192.168.4.16:5000,ip=192.168.1.103,mac=aa.bb.cc.dd.ee.04,dest=
 {0}/dbe_ifconfig=down:1500:4:0.0.0.0:0.0.0.0;
 
 # Step two: set the 10G eth MAC address and bring the interfaces up
-#           with their appropriate settings
+#           with their appropriate settings and show the result on the
+#           screen
 {0}/dbe_mac={{mac}};
 {0}/dbe_ifconfig=up:9000:4:{{ip}}:192.168.1.1;
+{0}/dbe_ifconfig?
 
 # Step three: put the Mark6 IPv4 <-> MAC address table into each RDBE.
 # The current table was built like this:
@@ -55,4 +59,11 @@ alias rdbe4 (rdbe 192.168.4.16:5000,ip=192.168.1.103,mac=aa.bb.cc.dd.ee.04,dest=
 {0}/dbe_arp=force:192.168.1.5:00.60.dd.45.75.b3;
 
 # Step four: program the default data destination in each RDBE
+#            and query it for display purposes
 {0}/dbe_data_connect={{dest}};
+{0}/dbe_data_connect?
+
+# Step five: (re)set tsys monitoring and query it for display
+{0}/dbe_tsys_mon=disable
+{0}/dbe_tsys_mon={{tsys}}
+{0}/dbe_tsys_mon?
