@@ -2316,15 +2316,20 @@ linesplit = compose(re.compile(r'\s*;;+\s*').split, itemgetter(0), methodcaller(
 cleanup   = compose(str.strip, partial(re.compile(r'\s+;\s+').sub, ';'), partial(re.compile(r'^\s*;\s*').sub, ''))
 get_lines = compose(Filter(GetN(1)), Enumerate(1), Map(compose(GetN(0), Map(str.strip), methodcaller('split', '#'))), open)
 def playfile(fn, args):
+    lineNr = -1
     try:
+        # Note: "n" is not potentially a sequence of 1...<num-lines-in-file> because the 
+        #       get_lines() filters out empty / comment lines and returns only the line
+        #       numbers of lines that actually contain commands
         for (n, line) in get_lines(fn):
+            lineNr = n
             yield line.format(*args)
     except KeyError, msg:
-        print "{0}:{1} Attempt to substitute key {2} - either use double {{ }} in the script or nothing".format(fn, n, msg)
+        print "{0}:{1} Attempt to substitute key {2} - either use double {{ }} in the script or nothing".format(fn, lineNr, msg)
     except IndexError:
-        print "{0}:{1} Not enough arguments passed to script".format(fn, n)
+        print "{0}:{1} Not enough arguments passed to script".format(fn, lineNr)
     except IOError, msg:
-        print "{0}:{1} {2}".format(fn, n, msg)
+        print "{0}:{1} {2}".format(fn, lineNr, msg)
     except EOFError:
         raise StopIteration
 
