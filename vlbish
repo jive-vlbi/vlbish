@@ -305,6 +305,11 @@ def maybe_exec(f, eret):
 # if proc(..) threw an exception
 maybe_process_f  = lambda proc, e=None: choice(choice(is_not_none, os.path.exists, const(e)), maybe_exec(proc, e), const(e))
 process_f        = lambda proc, e=None: choice(is_not_none, maybe_exec(proc, e), const(e))
+FLOAT            = r'(\.\d+|\d+(\.\d*)?)'  # .<digits> or <digit>[.[<digits>]]  (yes, also ints ...)
+delete_repeat    = compose(partial(re.sub, re.compile(r',\s*,'), ","),# if somewhere in the middle strip ws + one ,
+                           partial(re.sub, re.compile(r',\s*$'), ""), # if repeat was the last  entry strip trailing , +ws
+                           partial(re.sub, re.compile(r'^\s*,'), ""), # if repeat was the first entry strip ws + comma
+                           partial(re.sub, re.compile(r'repeat\s*=\s*'+FLOAT+'\s*(:\s*\d+\s*)?'), "")) # delete repeat=num[:num]
 
 def do_raise(x):
     def actually_raise(*args):
@@ -698,7 +703,8 @@ def handleCommand(env, mo):
         env.jobs[ env.jobid ].commandLine = mo.string
         printf(env, "Started background JOB[{0:d}]".format(env.jobid))
     env.release()
-    return setattr_('selection', selection)(env)
+    # we should strip the "repeat=...." from the selection
+    return setattr_('selection', delete_repeat(selection))(env)
 
 
 ################## Parsing support ##########################
