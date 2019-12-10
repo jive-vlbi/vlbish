@@ -415,6 +415,7 @@ rxTimeout   = re.compile(r"^timeout(\s+(?P<timeout>\S+))?$", re.I).match
 rxSleep     = re.compile(r"^sleep(\s+(?P<timeout>\S+))?$", re.I).match
 rxResolve   = re.compile(r"^(?P<symbolic>symbolic)?resolve(?P<trace>/trace)?(\s+(?P<selection>.+))?$", re.I).match
 rxCommand   = re.compile(r"^((?P<m5spec>[^/!]+)?(?P<type>[/!]))?(?P<cmd>.+)$").match
+rxEcho      = re.compile(r"^echo(\s+(\S.*))?$", re.I).match
 
 def partition(predicate, iterable):
     ltrue, lfalse = [], []
@@ -663,6 +664,11 @@ def handleTimeout(env, timeoutmatch):
             raise ValueError, "Negative timeout not allowed!"
         env.timeout = to
     collectf(env, "socket timeout: {0}".format(env.timeout))
+    return env
+
+def handleEcho(env, echomatch):
+    import datetime
+    printf(env, str(datetime.datetime.now())+": "+echomatch.group(2))
     return env
 
 def handleResolve(env, mo):
@@ -2357,6 +2363,7 @@ def readlist(l):
         yield line.strip()
 
 def handlePlay(env, mo):
+    print "handlePlay/mo.groups()=",mo.groups()
     env.lijst.append( playfile(mo.group('file'), [] if mo.group('args') is None else mo.group('args').split()) )
     return env
 
@@ -2388,6 +2395,7 @@ class vlbish_ctx(object):
 
     def __init__(self, cmdgen, pfn, cfn, histFile):
         self.lijst        = [cmdgen] if type(cmdgen) is not list else cmdgen # can now pass in list-of-generators ...
+        self.generator_s  = dict() # keep generator "state" in here so we can come back to them
         self.lines        = iter([])
         self.lastGen      = self.lijst[-1]
         self.printfn      = pfn
@@ -2446,9 +2454,47 @@ class vlbish_ctx(object):
     def __next__(self):
         return self.next()
 
+    def new_next(self):
+        if not hasattr(self, 'counter'):
+            self.counter = 0
+        pfx = "vlbish_ctx[{0:2d}]: ".format( self.counter )
+        skip = " " * len(pfx)
+        self.counter += 1
+        # check if any of the commands appended a new generator to
+        # the end of the list because then we must switch to handling
+        # that one first!
+        # But that only makes sense *if* there is still a list ...
+        if not self.lijst:
+            raise StopIteration
+        toSend           = self.selection
+        curGen           = self.lijst[-1]
+        if self.lastGen != curGen:
+            # Switch to new (or previously stacked) generator
+            if curGen not in self.generator_s:
+                # new one - get all the lines from that one once
+                self.generator_s[ curGen ] = iter(filter(truth, map(cleanup, linesplit(curGen.send(None)))))
+            self.lastGen = curGen
+        # check if there's any more commands in that generator
+        try:
+            l = next(self.generator_s[self.lastGen])
+            print pfx, "LINE=",l
+            return l
+        except StopIteration:
+            # OK that generator is exhausted
+            pass
+
+
     def next(self):
+        #if not hasattr(self, 'counter'):
+        #    self.counter = 0
+        #pfx = "vlbish_ctx[{0:2d}]: ".format( self.counter )
+        #skip = " " * len(pfx)
+        #self.counter += 1
         try:
             return next(self.lines)
+            #print pfx, "LINE=",l
+            #return l
+            #return next(self.lines)
         except StopIteration:
             # if no more generators in lijst, then we're really done
             if not self.lijst:
@@ -2461,7 +2507,17 @@ class vlbish_ctx(object):
                     # because the first time something is sent into a
                     # generator, it MUST be None, according to the Pythonians
                     toSend       = self.selection if self.lijst[-1] is self.lastGen else None
+                    #ls = linesplit(self.lijst[-1].send(toSend))
+                    #cu = map(cleanup, ls)
+                    #tr = filter(truth, cu)
+                    #print pfx, "lines:", ls
+                    #print skip, "toSend:", toSend
+                    #print skip, "cleanup:", cu
+                    #print skip, "truth:", tr
+                    #self.lines   = iter(tr)
                     self.lines   = iter(filter(truth, map(cleanup, linesplit(self.lijst[-1].send(toSend)))))
+                    #if self.lastGen!=self.lijst[-1]:
+                    #    print pfx, "self.lastGen=",self.lastGen," self.lijst[-1]=",self.lijst[-1]
                     self.lastGen = self.lijst[-1]
                 except StopIteration:
                     # current line generator is exhausted, remove from stack
@@ -2483,9 +2539,12 @@ builtin_commands = [
     (rxTimeout, handleTimeout),
     (rxSleep,   handleSleep),
     (rxPlay,    handlePlay),
+    (rxEcho,    handleEcho),
     (rxHelp,    usage),
     (rxStop,    ewrap(handleStop)),
     (rxQuit,    ewrap(setattr_('quit', True))),
+    # keep this entry last as it will match basically anything
+    # and treat it as if it were a command
     (rxCommand, handleCommand),
 ]
 
