@@ -2363,7 +2363,6 @@ def readlist(l):
         yield line.strip()
 
 def handlePlay(env, mo):
-    print "handlePlay/mo.groups()=",mo.groups()
     env.lijst.append( playfile(mo.group('file'), [] if mo.group('args') is None else mo.group('args').split()) )
     return env
 
@@ -2391,13 +2390,19 @@ class background_job(object):
         map(threading.Thread.join, self.threads)
         return
 
+# The way to extract commands from a generator:
+# split the line into potentially multiple lines (";;" separated commands),
+# followed by cleaning up (removing whitespace &cet) of the individual commands,
+# followed by removing empty commands and finally turning the result into
+# an iterator over the non-empty commands ...
+mk_lines = compose(iter, Filter(truth), Map(cleanup), linesplit)
+
 class vlbish_ctx(object):
 
     def __init__(self, cmdgen, pfn, cfn, histFile):
         self.lijst        = [cmdgen] if type(cmdgen) is not list else cmdgen # can now pass in list-of-generators ...
-        self.generator_s  = dict() # keep generator "state" in here so we can come back to them
-        self.lines        = iter([])
-        self.lastGen      = self.lijst[-1]
+        self.generator_s  = dict() # keep state of active generators in here
+        self.lastGen      = None
         self.printfn      = pfn
         self.collectfn    = cfn
         self.historyFile  = histFile
@@ -2454,78 +2459,38 @@ class vlbish_ctx(object):
     def __next__(self):
         return self.next()
 
-    def new_next(self):
-        if not hasattr(self, 'counter'):
-            self.counter = 0
-        pfx = "vlbish_ctx[{0:2d}]: ".format( self.counter )
-        skip = " " * len(pfx)
-        self.counter += 1
+    def next(self):
         # check if any of the commands appended a new generator to
         # the end of the list because then we must switch to handling
         # that one first!
         # But that only makes sense *if* there is still a list ...
         if not self.lijst:
             raise StopIteration
-        toSend           = self.selection
         curGen           = self.lijst[-1]
-        if self.lastGen != curGen:
-            # Switch to new (or previously stacked) generator
-            if curGen not in self.generator_s:
-                # new one - get all the lines from that one once
-                self.generator_s[ curGen ] = iter(filter(truth, map(cleanup, linesplit(curGen.send(None)))))
-            self.lastGen = curGen
-        # check if there's any more commands in that generator
+        # If there's a new generator on top, create new state for that one
+        if self.lastGen != curGen and curGen not in self.generator_s:
+            # first time ".send()" is called on this one so must send None!
+            self.generator_s[ curGen ] = mk_lines( curGen.send(None) )
+        # Now we can switch to the new current generator
+        self.lastGen = curGen
         try:
-            l = next(self.generator_s[self.lastGen])
-            print pfx, "LINE=",l
-            return l
+            # try if there's any more commands in the iterable
+            # from the current generator
+            return next( self.generator_s[self.lastGen] )
         except StopIteration:
-            # OK that generator is exhausted
-            pass
-
-
-    def next(self):
-        #if not hasattr(self, 'counter'):
-        #    self.counter = 0
-        #pfx = "vlbish_ctx[{0:2d}]: ".format( self.counter )
-        #skip = " " * len(pfx)
-        #self.counter += 1
-        try:
-            return next(self.lines)
-            #print pfx, "LINE=",l
-            #return l
-            #return next(self.lines)
-        except StopIteration:
-            # if no more generators in lijst, then we're really done
-            if not self.lijst:
-                raise StopIteration
-            else:
-                try:
-                    # Current list of lines exhausted
-                    # attempt to get next line from generator
-                    # We must detect if a new generator was added 'behind our backs'
-                    # because the first time something is sent into a
-                    # generator, it MUST be None, according to the Pythonians
-                    toSend       = self.selection if self.lijst[-1] is self.lastGen else None
-                    #ls = linesplit(self.lijst[-1].send(toSend))
-                    #cu = map(cleanup, ls)
-                    #tr = filter(truth, cu)
-                    #print pfx, "lines:", ls
-                    #print skip, "toSend:", toSend
-                    #print skip, "cleanup:", cu
-                    #print skip, "truth:", tr
-                    #self.lines   = iter(tr)
-                    self.lines   = iter(filter(truth, map(cleanup, linesplit(self.lijst[-1].send(toSend)))))
-                    #if self.lastGen!=self.lijst[-1]:
-                    #    print pfx, "self.lastGen=",self.lastGen," self.lijst[-1]=",self.lijst[-1]
-                    self.lastGen = self.lijst[-1]
-                except StopIteration:
-                    # current line generator is exhausted, remove from stack
-                    self.lijst.pop()
-        # either a new set of lines have been generated or we popped a
-        # linegenerator so we need to trigger another 'next()' to see what's
-        # really next
+            # Guess not! The previous iterable seems exhausted. 
+            try:
+                # Do a new send to check if it's *really* exhausted;
+                # there may be more where that came from.
+                self.generator_s[ self.lastGen ] = mk_lines( self.lastGen.send(self.selection) )
+            except StopIteration:
+                # OK that generator is srsly exhausted, remove
+                self.generator_s.pop( curGen )
+                self.lijst.pop()
+        # Either the generator produced new line(s) or we popped a linegenerator
+        # so we need to trigger another 'next()' to see what's really next
         return next(self)
+
 
 
 ewrap = lambda f, idx=0: (lambda *args: f(args[idx]))
