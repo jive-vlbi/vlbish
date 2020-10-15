@@ -231,27 +231,59 @@
 #
 # Author:  Harro Verkouter  3 Sep 2010
 # Rewrite: Harro Verkouter 24 Nov 2016
+from __future__ import print_function
+from functools  import partial, reduce
+from itertools  import product, repeat
+from six        import iteritems
+from operator   import truth, contains, eq, is_not, attrgetter, itemgetter, methodcaller, __add__, is_
 import sys, os, re, time, socket, traceback, pickle, fcntl, termios, struct, copy, threading, importlib, collections, argparse
-from functools import partial
-from itertools import product, repeat
-from operator  import truth, contains, eq, is_not, attrgetter, itemgetter, methodcaller, __add__, is_
 
 # some global stuff
 version     = "$Id$"
 description =  "Control local and remote (== @stations) Mark5s, FlexBuffs, FiLa10Gs, sfxc cluster nodes from one place"
+identity    = lambda x, *a, **kw   : x
+
+# Very crude Py2/Py3 detection - 
+# to be able to have an as efficient as possible 
+# "convert map/filter/iterable into list"
+# 2to3 would transform:
+#   map(....) 
+# unconditionally into list( map(...) ) for ensuring
+# Py2/Py3 compatibility. But if that code is run under
+# Py2 the map() result already *is* a list and 
+# "list( list(...) )" is dumb - a 2nd copy of the list is made.
+# Using our "List( ... )" below eliminates that, only transforms
+# into list under Py3, and is a no-op in Py2
+try:
+    input   = raw_input
+    List    = identity
+    # In Py2 we never have to consume an iterable for its side effects
+    consume = identity
+    Range   = range
+    # combine "list(map(...)) - under Py2 not needed
+    Lmap    = map
+except NameError:
+    List  = list
+    Range = lambda *args: list(range(*args))
+    # Thanks to Py3 one must sometimes drain an iterable for its side effects. Thanks guys!
+    # From https://docs.python.org/2/library/itertools.html#recipes
+    #     consume(), all_equal()
+    consume  = partial(collections.deque, maxlen=0)
+    # combine "list(map(...)) - under Py2 not needed
+    Lmap    = lambda *args: list(map(*args))
 
 # everybody SHOULD love function composition :-)
 compose     = lambda *fns   : (lambda x: reduce(lambda acc, f: f(acc), reversed(fns), x))
 choice      = lambda p, t, f: (lambda x: t(x) if p(x) else f(x))  # branch
 choice_kw   = lambda p, t, f: (lambda x, **kwargs: t(x, **kwargs) if p(x, **kwargs) else f(x, **kwargs))  # branch
 ylppa       = lambda x      : (lambda f: f(x))                    # ylppa is 'apply' in reverse ...
-combine     = lambda f, *fns: (lambda x: f(*map(ylppa(x), fns)))  # f( fn[0](x), fn[1](x), ... )
+combine     = lambda f, *fns: (lambda x: f(*Lmap(ylppa(x), fns)))  # f( fn[0](x), fn[1](x), ... )
 swap_args   = lambda f      : (lambda a, b, *args, **kwargs: f(b, a, *args, **kwargs))
 logic_or    = lambda x, y   : x or y                              # operator.__or__ / __and__ are /bitwise/ ops!
 logic_and   = lambda x, y   : x and y                             #               ..
 const       = lambda x      : (lambda y: x)                       # return the same value irrespective of input
 between     = lambda a, b   : (lambda x: a<=x<b)                  # missing from module 'operator'?
-m_itemgetter= lambda *idx   : (lambda x: map(x.__getitem__, idx)) # _ALWAYS_ returns [...], irrespective of #-of-indices
+m_itemgetter= lambda *idx   : (lambda x: Lmap(x.__getitem__, idx)) # _ALWAYS_ returns [...], irrespective of #-of-indices
                                                                   #   for laughs, look up 'operator.itemgetter()' => 3 (three!)
                                                                   #   different types of return type depending on arguments! FFS!
 # reorder_args: call f with the arguments indicated by idx:
@@ -266,14 +298,13 @@ setattr_    = lambda a, v          : combine(logic_or, partial(reorder_args(seta
 delattr_    = lambda a             : combine(logic_or, partial(reorder_args(delattr, 1, 0), a), identity)
 maybe_get   = lambda a, d=None     : choice(hasattr_(a), getattr_(a), const(d))
 maybe_set   = lambda a, v          : choice(const(is_not_none(v)), setattr_(a, v), identity)
-identity    = lambda x, *a, **kw   : x
 mk_query    = lambda c, t, w, *args: "SELECT {0} FROM {1} WHERE {2}{3}".format(c, t, w, "" if not args else " and "+args[0])
 do_update   = lambda x, y          : x.update(y) or x
 hasitem_    = lambda n             : methodcaller('__contains__', n)
 setitem_    = lambda n, v          : lambda o: setitem(o, n, v) or o
 if_missing  = lambda n, v          : choice(hasitem_(n), identity, setitem_(n, v))
-d_filter    = lambda keys          : (lambda d: dict(((k,v) for k,v in d.iteritems() if k in keys)))
-d_filter_n  = lambda keys          : (lambda d: dict(((k,v) for k,v in d.iteritems() if k not in keys)))
+d_filter    = lambda keys          : (lambda d: dict(((k,v) for k,v in iteritems(d) if k in keys)))
+d_filter_n  = lambda keys          : (lambda d: dict(((k,v) for k,v in iteritems(d) if k not in keys)))
 printf      = lambda x, y : x.printfn(y)
 collectf    = lambda x, y : x.collectfn(y)
 
@@ -289,7 +320,7 @@ truth_tbl   = lambda *args: tuple(map(truth, args))
 Filter      = lambda pred: partial(filter, pred)
 Map         = lambda fn: partial(map, fn)
 GetN        = itemgetter
-Zip         = lambda l: lambda x: zip(l, x)
+Zip         = lambda l: lambda x: List(zip(l, x))
 Enumerate   = lambda n=0: lambda l: enumerate(l, n)
 # wrap f and catch exception if "f(...)" throws. Return "eret" in that case
 def maybe_exec(f, eret):
@@ -297,7 +328,7 @@ def maybe_exec(f, eret):
         try:
             return f(*args, **kwargs)
         except Exception as E:
-            print traceback.format_exc() if userinput.debug else str(E)
+            print(traceback.format_exc() if userinput.debug else str(E))
         return eret
     return try_it
 
@@ -313,7 +344,7 @@ delete_repeat    = compose(partial(re.sub, re.compile(r',\s*,'), ","),# if somew
 
 def do_raise(x):
     def actually_raise(*args):
-        raise x
+        raise(x)
     return actually_raise
 
 ################ argparse / command-line handling ###############################
@@ -378,7 +409,7 @@ def getScreenSize():
         hw = struct.unpack('hh', fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, '1234'))
     except:
         try:
-            hw = map(int, (os.environ['LINES'], os.environ['COLUMNS']))
+            hw = Lmap(int, (os.environ['LINES'], os.environ['COLUMNS']))
         except:  
             hw = None
     return hw
@@ -389,7 +420,7 @@ screenSize = getScreenSize()
 def print_debug(pfx):
     realpfx = "{0}:".format(pfx)
     def print_it(x):
-        print realpfx,x
+        print(realpfx, x)
         return x
     return print_it
 
@@ -398,7 +429,7 @@ DD = (lambda y: print_debug(y)) if userinput.debug else (lambda y: identity)
 
 # queries?
 def print_query(x):
-    print "QUERY: ",x
+    print("QUERY: ", x)
     return x
 Q = print_query if userinput.queries else identity
 
@@ -414,6 +445,7 @@ rxKill      = re.compile(r"^kill(\s+(?P<tid>[0-9]+))?$", re.I).match
 rxTimeout   = re.compile(r"^timeout(\s+(?P<timeout>\S+))?$", re.I).match
 rxSleep     = re.compile(r"^sleep(\s+(?P<timeout>\S+))?$", re.I).match
 rxResolve   = re.compile(r"^(?P<symbolic>symbolic)?resolve(?P<trace>/trace)?(\s+(?P<selection>.+))?$", re.I).match
+rxStripNL   = re.compile(r"^stripnl$", re.I).match
 rxCommand   = re.compile(r"^((?P<m5spec>[^/!]+)?(?P<type>[/!]))?(?P<cmd>.+)$").match
 
 def partition(predicate, iterable):
@@ -467,7 +499,7 @@ def getdbconnection(db, host, port):
         try:
             return MYSQL.connect(host=attempt[0], port=attempt[1], db=attempt[2], read_default_file="~/.my.cnf")
         except Exception as E:
-            print traceback.format_exc() if userinput.debug else str(E)
+            print(traceback.format_exc() if userinput.debug else str(E))
             pass
     return None
 
@@ -499,7 +531,7 @@ class YesDBManager(collections.defaultdict):
             conn.ping()
             return conn
         except Exception as E:
-            print traceback.format_exc() if userinput.debug else str(E)
+            print(traceback.format_exc() if userinput.debug else str(E))
             del self[db]
             return self.get(db)
 
@@ -531,7 +563,7 @@ def dfs_seen(node, graph, seen, cycles):
     else:
         seen.append(node)
         if node in graph:
-            map(lambda x: dfs_seen(x, graph, copy.deepcopy(seen), cycles), graph[node])
+            consume(map(lambda x: dfs_seen(x, graph, copy.deepcopy(seen), cycles), graph[node]))
     return cycles
 
 def cycle_detect(graph):
@@ -548,7 +580,7 @@ def handleAlias(env, aliasmatch):
     if definition:
         # cannot redefine dynamic 'aliases'
         if name in ["alle", "stations"]:
-            raise RuntimeError, "The '{0}' dynamic alias cannot be redefined".format(name)
+            raise RuntimeError("The '{0}' dynamic alias cannot be redefined".format(name))
 
         # also should not allow to define recursive aliases!
         # so: add the alias to a tmp copy and verify that it does not lead to cycles
@@ -564,21 +596,21 @@ def handleAlias(env, aliasmatch):
 
         # (2a): transform list of alias names into a list of functions that
         #       search a string for the occurrence of that alias
-        keyFinders = map(compose(partial(partial, re.search), r"\b{}\b".format), tmpAliases.keys())
+        keyFinders = Lmap(compose(partial(partial, re.search), r"\b{}\b".format), tmpAliases.keys())
         # (2b): keySearch is a function that scans a string for all defined aliases and
         #       returns a list of aliases that occurred in the string
         keySearch  = compose(partial(map, methodcaller('group')), filter_true, partial(reorder_args(map, 1, 0), keyFinders), ylppa)
         # (2c): build graph of aliases containing other alias(es)
-        graph      = reduce(lambda acc, arg: (acc.setdefault(arg[0], keySearch(arg[1])) is None) or acc, tmpAliases.iteritems(), {})
+        graph      = reduce(lambda acc, arg: (acc.setdefault(arg[0], keySearch(arg[1])) is None) or acc, iteritems(tmpAliases), {})
 
         # (3) detect cycles
         if DD("cycle_detect: ")(cycle_detect(graph)):
-            raise RuntimeError, "The definition of {0} => {1} would lead to a cycle in your aliases".format(name, definition)
+            raise RuntimeError("The definition of {0} => {1} would lead to a cycle in your aliases".format(name, definition))
         # (5) Profit!
         env.aliases[name] = definition
 
     # now we either print one or all aliases
-    for (nm, defn) in ((choice(is_not_none, compose(d_filter, listify), const(identity))(name))(env.aliases)).iteritems():
+    for (nm, defn) in iteritems(((choice(is_not_none, compose(d_filter, listify), const(identity))(name))(env.aliases))):
         collectf(env, "{0} => {1}".format(nm, defn))
     return env
 
@@ -587,7 +619,7 @@ def handleDelete(env, aliasmatch):
     try:
         del env.aliases[ which ]
     except KeyError:
-        raise RuntimeError, "{0}: no such alias defined".format( which )
+        raise RuntimeError("{0}: no such alias defined".format( which ))
     return env
 
 
@@ -621,7 +653,7 @@ def handleKill(env, killmatch):
     # test "if not haveTid" would succeed ....
     env.acquire()
     if jobid is None:
-        for (jobid, job) in env.jobs.iteritems():
+        for (jobid, job) in iteritems(env.jobs):
             collectf(env, "job[{0}] {1}".format(jobid, job.commandLine))
     else:
         if jobid not in env.jobs:
@@ -660,7 +692,7 @@ def handleTimeout(env, timeoutmatch):
     if timeoutstr:
         to = float(timeoutstr)
         if to<0.0:
-            raise ValueError, "Negative timeout not allowed!"
+            raise ValueError("Negative timeout not allowed!")
         env.timeout = to
     collectf(env, "socket timeout: {0}".format(env.timeout))
     return env
@@ -745,16 +777,16 @@ def mk_tokenizer(tokens):
         # into:
         #    tokens = [ (rx_match_string_at_pos, token_fn), ... ]
         # so the only input that 'rx_match_string_at_pos' is the position where to attempt the match
-        pp_tokens      = map(lambda rx_tp: (partial(rx_tp[0].match, string), rx_tp[1]), tokens)
+        pp_tokens      = Lmap(lambda rx_tp: (partial(rx_tp[0].match, string), rx_tp[1]), tokens)
         # 'creator' is the function that makes the token -
         (pos, creator) = (0, itemgetter(1))
         while pos<len(string):
             # Run all known regexps against the current string and filter out which one matched
-            moList  = map(lambda mo_tp: (mo_tp[0], (creator(mo_tp))(mo_tp[0], position=pos, **env)),
+            moList  = Lmap(lambda mo_tp: (mo_tp[0], (creator(mo_tp))(mo_tp[0], position=pos, **env)),
                           filter(filter_fn,
                                  map(lambda rx_tf: (rx_tf[0](pos), rx_tf[1]), pp_tokens)))
             if len(moList)==0:
-                raise RuntimeError, "\n{0}\n{1:>{2}s}^\n{3} tokens matched here".format(string, "", pos, len(moList))
+                raise RuntimeError("\n{0}\n{1:>{2}s}^\n{3} tokens matched here".format(string, "", pos, len(moList)))
             # extract match-object and the token from the result list
             (mo, token)  = moList[0]
             pos         += (mo.end() - mo.start())
@@ -844,15 +876,15 @@ class resolved_name(object):
         return reduce(lambda acc, kv: setattr(acc, kv[0], kv[1]) or acc, kwargs.items(), self)
 
     def options(self):
-        return dict(((k,v) for k,v in self.__dict__.iteritems() if k not in resolved_name.defaults.keys()))
+        return dict(((k,v) for k,v in iteritems(self.__dict__) if k not in resolved_name.defaults.keys()))
 
     def __repr__(self):
         optDict = self.options()
         return "{0} => {1}@{2}:{3}{4}".format(self.name, self.user, self.host, self.port, " "+repr(optDict) if optDict else "")
 
 
-crossproducts = lambda l1, l2: map(partial(str.join, ''), product(l1, l2))
-charrange     = lambda f,  l : map(chr, xrange(ord(f), ord(l)+1))
+crossproducts = lambda l1, l2: Lmap(partial(str.join, ''), product(l1, l2))
+charrange     = lambda f,  l : Lmap(chr, Range(ord(f), ord(l)+1))
 
 maybe_set_port   = partial(maybe_set, 'port')
 maybe_set_user   = partial(maybe_set, 'user')
@@ -871,10 +903,10 @@ def maybe_lookup_flexbuff(num_or_station, by_station):
     else:
         b = (["control_ip"], "local_flexbuff", "name='{0}'".format(num_or_station))
         mk_entry = lambda row: resolved_name(host=row[0], user='jops')
-    return map(mk_entry, query(dbManager.get('hardware'), *b))
+    return Lmap(mk_entry, query(dbManager.get('hardware'), *b))
 
 def maybe_get_fb_ip_and_host(fb):
-    return reduce(__add__, map(combine(mk_list, itemgetter(0), itemgetter(1)),
+    return reduce(__add__, Lmap(combine(mk_list, itemgetter(0), itemgetter(1)),
                                query(dbManager.get('hardware'),
                                      ["name", "control_ip"], "local_flexbuff", "name='{0}'".format(fb_name(fb)))),
                   [])
@@ -883,27 +915,27 @@ def maybe_get_fb_ip_and_host(fb):
 # replace with the dbbc_proxy associated with the station
 def maybe_lookup_dbbc(estation):
     rows = query(dbManager.get('ccs'), ["dbbc_proxy_ip", "dbbc_proxy_port"], "eVLBI_Params", "e_station_name='{0}'".format(estation))
-    return map(lambda row: resolved_name(name=estation, host=str(row[0]), port=int(row[1])), rows)
+    return Lmap(lambda row: resolved_name(name=estation, host=str(row[0]), port=int(row[1])), rows)
 
 
 def modifier_set_user(list_in, user, *args):
-    return map(methodcaller('update', user=user), list_in)
+    return Lmap(methodcaller('update', user=user), list_in)
 
 def modifier_set_port(list_in, port, *args):
-    return map(methodcaller('update', port=port), list_in)
+    return Lmap(methodcaller('update', port=port), list_in)
 
 #  ((([a-l])-([a-l]))|([a-l]+))((([0-3])-([0-3]))|([0-3]+))
 #  012       3        4        567       8        9
 def expand_nodes(mo):
     g = mo.groups()
     if g[2] and g[3] and g[3] < g[2]:
-        raise RuntimeError, "Last node name is smaller than first node name"
+        raise RuntimeError("Last node name is smaller than first node name")
     if g[7] and g[8] and g[8] < g[7]:
-        raise RuntimeError, "Last node number is smaller than first node number"
+        raise RuntimeError("Last node number is smaller than first node number")
     # we have either 2 or 3 and 4 for the nodes
     nodes = g[4] if not (g[2] and g[3]) else charrange(g[2], g[3])
     nums  = g[9] if not (g[7] and g[8]) else charrange(g[7], g[8])
-    return crossproducts(nodes, nums)
+    return List(crossproducts(nodes, nums))
 
 #  (([0-9]+)-([0-9]+))
 #  01        2
@@ -911,8 +943,8 @@ def expand_range(mo):
     g = mo.groups()
     (s, e) = (int(g[1]), int(g[2]))
     if e < s:
-        raise RuntimeError, "{0}: Last number is smaller than first".format(g[0])
-    return xrange(s, e+1)
+        raise RuntimeError("{0}: Last number is smaller than first".format(g[0]))
+    return Range(s, e+1)
 
 ####################################################################################
 ##
@@ -962,7 +994,7 @@ class Mk5(Resolveable):
             result = maybe_lookup_evlbi(self.value.value)
         elif ts is Host:
             result = [self.value]
-        return map(lambda rn: rn.update(**self.options()), result)
+        return Lmap(lambda rn: rn.update(**self.options()), result)
 
     def resolve_as_source(self):
         # look up where 'Mk5 <station>' is sending to
@@ -978,7 +1010,7 @@ class Mk5(Resolveable):
         rec_cond   = "data_type.data_source_location = 'evlbi://{0}'".format(self.value.value)
 
         # transform query results
-        return map(get_receiver, raw_query(dbManager.get('correlator_control'),
+        return Lmap(get_receiver, raw_query(dbManager.get('correlator_control'),
                                            query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=strm_cond,
@@ -1035,7 +1067,7 @@ class Station(Resolveable):
         # if no results from the database then resolve to just-a-name ...
         rows = raw_query(dbManager.get('correlator_control'), station_qry(experiment_f(self.options()), self.value))
         mk_rv = methodcaller('__call__', Station(self.value, **self.options()))
-        return map(compose(mk_rv, mk_ds, itemgetter(0)), rows) if rows else [resolved_name(host=self.value)]
+        return Lmap(compose(mk_rv, mk_ds, itemgetter(0)), rows) if rows else [resolved_name(host=self.value)]
 
     def resolve_as_source(self):
         # look up where this station is sending to
@@ -1049,7 +1081,7 @@ class Station(Resolveable):
         rec_cond   = "data_type.data_source_location regexp ('^[^:]+://{0}')".format(self.value)
 
         # transform query results
-        return map(get_receiver, raw_query(dbManager.get('correlator_control'),
+        return Lmap(get_receiver, raw_query(dbManager.get('correlator_control'),
                                            query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=strm_cond,
@@ -1071,7 +1103,7 @@ class DBBC(Resolveable):
         # if we were a generic host transformed to 'dbbc' then let the contained value resolve itself
         if type(self.value) is Host:
             return self.value.resolve()
-        return map(partial(resolved_name.update, **d_filter_n(['port'])(self.options())), maybe_lookup_dbbc(self.value.value))
+        return Lmap(partial(resolved_name.update, **d_filter_n(['port'])(self.options())), maybe_lookup_dbbc(self.value.value))
 
 class FiLa(DBBC):
     def __init__(self, fila, **kwargs):
@@ -1087,7 +1119,7 @@ class FiLa(DBBC):
         updatert = partial(resolved_name.update, **d_filter_n(['port'])(self.options()))
         if type(self.value) is Host:
             return updatert( self.value.resolve() )
-        return map(updatert, maybe_lookup_dbbc(self.value.value))
+        return Lmap(updatert, maybe_lookup_dbbc(self.value.value))
 
     def resolve_as_source(self):
         # look up where this FiLa is sending to
@@ -1101,7 +1133,7 @@ class FiLa(DBBC):
         rec_cond   = "data_type.data_source_location = 'fila://{0}'".format(self.value.value)
 
         # transform query results
-        return map(get_receiver, raw_query(dbManager.get('correlator_control'),
+        return Lmap(get_receiver, raw_query(dbManager.get('correlator_control'),
                                            query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=strm_cond,
@@ -1128,7 +1160,7 @@ class RDBE(Resolveable):
 # field system control files have "*" as comment character
 # so filter any non-empty lines
 fs_ctl = compose(DD(" content"), choice(os.path.isfile,
-                        compose(Filter(re.compile("^\s*[^\*]+.*(\*|$)?").match), open),
+                        compose(List, Filter(re.compile("^\s*[^\*]+.*(\*|$)?").match), open),
                         compose(const([]), DD("No such file"))),
                  DD("CTL file"),
                  partial(os.path.join, "/", "usr2", "control"))
@@ -1138,14 +1170,15 @@ fs_ctl = compose(DD(" content"), choice(os.path.isfile,
 #   * blah 
 #   <host> <port> <timeout>
 # This method gives [Host(host, port=port)] or [] if nothing found
-get_addr = compose(Map(compose(lambda d:resolved_name(**d), dict, Zip(["host", "port", "timeout"]), Map(str.strip), str.split)),fs_ctl)
+get_addr = compose(List, Map(compose(lambda d:resolved_name(**d), dict,
+                   Zip(["host", "port", "timeout"]), Map(str.strip), str.split)),fs_ctl)
 
 # /usr2/control/rdbead.ctl (if exists) has one or more lines like:
 #  RDBEn <addr>
 # So: extract the non-comment lines from rdbead.ctl, match them agains RDBEn (the one we're looking for)
 #     filter out the matching ones and transform each to a resolved name with only host
 # Thus: returns empty list if no matching RDBE can be found
-get_rdbe = lambda n: compose(Map(compose(lambda h:resolved_name(host=h), methodcaller('group', 1))),
+get_rdbe = lambda n: compose(List, Map(compose(lambda h:resolved_name(host=h), methodcaller('group', 1))),
                      Filter(truth), Map(re.compile("^\s*rdbe{0}\s+(\S+)".format(n), re.I).match))\
                      (fs_ctl("rdbead.ctl"))
 
@@ -1161,9 +1194,9 @@ class FieldSystem(Resolveable):
         updatert = partial(resolved_name.update, **self.options())
         # look in /usr2/control ..
         if type(self.value) is Mk5:
-            return map(updatert, get_addr("mk5ad.ctl"))
+            return Lmap(updatert, get_addr("mk5ad.ctl"))
         if type(self.value) in [DBBC, FiLa]:
-            return map(updatert, get_addr("dbbad.ctl"))
+            return Lmap(updatert, get_addr("dbbad.ctl"))
         if type(self.value) is RDBE:
             rdbe   = self.value
             if type(rdbe.value) is Host:
@@ -1173,7 +1206,7 @@ class FieldSystem(Resolveable):
                 rdbectl = fs_ctl("rdbe"+rdbe.value.value.lower())
             if type(rdbe.value) is Number:
                 # rdbe n => look in /usr2/control/rdbead.ctl for line "RDBEn <addr>"
-                return map(updatert, get_rdbe(rdbe.value.value))
+                return Lmap(updatert, get_rdbe(rdbe.value.value))
             return None
         # otherwise ... ?
         raise RuntimeError("FieldSystem error")
@@ -1202,7 +1235,7 @@ class Node(Resolveable):
         return Resolveable.options(self)
 
     def resolve(self):
-        return map(partial(resolved_name.update, **self.options()), maybe_resolve_sfxc_node(self.value))
+        return Lmap(partial(resolved_name.update, **self.options()), maybe_resolve_sfxc_node(self.value))
 
     # get destination(s) for this node
     def resolve_as_destination(self):
@@ -1216,11 +1249,11 @@ class Node(Resolveable):
         # recorded entries
         dt_dsl_rx  = "data_routing.data_dest_location regexp ('^[^:]+://{{0}}{0}')".format
         di_dsl_rx  = "data_input_org.data_source_location regexp ('^[^:]+://sfxc-{0}.sfxc{1}')".format
-        strm_conds = map(compose(dt_dsl_rx(portcond).format, attrgetter('host')), maybe_resolve_sfxc_node(self.value))
+        strm_conds = Lmap(compose(dt_dsl_rx(portcond).format, attrgetter('host')), maybe_resolve_sfxc_node(self.value))
         rec_cond   = di_dsl_rx(self.value, portcond)
 
         # transform query results
-        return map(get_sender, raw_query(dbManager.get('correlator_control'),
+        return Lmap(get_sender, raw_query(dbManager.get('correlator_control'),
                                          query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=" or ".join(strm_conds),
@@ -1246,7 +1279,7 @@ class Recorded(Resolveable):
 
 
 def maybe_unmap_sfxc_control_ip(ip):
-    return map(lambda row: Node(row[0]),
+    return Lmap(lambda row: Node(row[0]),
                query(dbManager.get('hardware'), ["name"], "sfxc_node", "control_ip='{0}'".format(ip)))
 
 extract_mk5_from_name = re.compile(r"^(?P<mk5c>c)?(?P<number>[0-9]+)$").match
@@ -1255,28 +1288,28 @@ def process_mk5_row(row):
     return compose(Modifier5C if mo.group('mk5c') else identity, Mk5, Number, int)( mo.group('number') )
 
 def maybe_unmap_local_mk5_control_ip(ip):
-    return map(process_mk5_row, query(dbManager.get('hardware'), ["name"], "mark5", "control_ip='{0}'".format(ip)))
+    return Lmap(process_mk5_row, query(dbManager.get('hardware'), ["name"], "mark5", "control_ip='{0}'".format(ip)))
 
 def maybe_unmap_remote_mk5_control_ip(ip):
-    return map(compose(Mk5, Station),
+    return Lmap(compose(Mk5, Station),
                query(dbManager.get('ccs'), ["e_station_name"], "eVLBI_Params", "e_station_control_ip='{0}'".format(ip)))
 
 def maybe_unmap_local_flexbuff_control_ip(ip):
-    return map(compose(combine(lambda fb_t, fb_i: FlexBuff(fb_t(fb_i)), get_fb_type, get_fb_id), methodcaller('groups'), match_flexbuff, itemgetter(0)),
+    return Lmap(compose(combine(lambda fb_t, fb_i: FlexBuff(fb_t(fb_i)), get_fb_type, get_fb_id), methodcaller('groups'), match_flexbuff, itemgetter(0)),
                query(dbManager.get('hardware'), ["name"], "local_flexbuff", "control_ip='{0}'".format(ip)))
 
 def maybe_unmap_remote_flexbuff_control_ip(ip):
-    return map(compose(FlexBuff, Station, itemgetter(0)),
+    return Lmap(compose(FlexBuff, Station, itemgetter(0)),
                query(dbManager.get('hardware'), ["station"], "remote_flexbuff", "control_ip='{0}'".format(ip)))
 
 def mk_host(mo):
     # mo.group(1) == {host}   mo.group(2) == {port}
     # Look through our Mk5, SFXC node or FlexBuff tables if we find an entry with name {host}
-    unmapped =  reduce(__add__, map(ylppa(mo.group(1)),
+    unmapped =  reduce(__add__, Lmap(ylppa(mo.group(1)),
                                     [maybe_unmap_sfxc_control_ip, maybe_unmap_local_mk5_control_ip,
                                      maybe_unmap_remote_mk5_control_ip, maybe_unmap_local_flexbuff_control_ip,
                                      maybe_unmap_remote_flexbuff_control_ip]), [])
-    return map(methodcaller('update', port=int(mo.group(2))), unmapped if unmapped else [Host(mo.group(1))])
+    return Lmap(methodcaller('update', port=int(mo.group(2))), unmapped if unmapped else [Host(mo.group(1))])
 
 
 ############################################
@@ -1313,7 +1346,7 @@ class FlexBuff(Resolveable):
         # FlexBuff <number>  => FlexBuff[s] @ JIVE
         # FlexBuff <station> => FlexBuff[s] @ Station
         # FlexBuff <host>    => Flexbuff with name <host>, if any
-        return map(partial(resolved_name.update, **self.options()),
+        return Lmap(partial(resolved_name.update, **self.options()),
                    maybe_lookup_flexbuff(fb_name(self.value), type(self.value) is Station))
 
     # get destination(s) for this flexbuf
@@ -1339,11 +1372,11 @@ class FlexBuff(Resolveable):
         # transform the IP addresses into "regexp ('^jive5ab://{ip}[{port}]')" conditions;
         dt_dsl_rx  = "data_routing.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
         di_dsl_rx  = "data_input_org.data_source_location regexp ('^jive5ab://{{0}}{0}')".format
-        strm_conds = map(dt_dsl_rx(portcond).format, names)
+        strm_conds = Lmap(dt_dsl_rx(portcond).format, names)
         rec_cond   = "(" + " or ".join(map(di_dsl_rx(portcond).format, names)) + ")"
 
         # transform query results; see above
-        return map(compose(get_sender, D), raw_query(dbManager.get('correlator_control'),
+        return Lmap(compose(get_sender, D), raw_query(dbManager.get('correlator_control'),
                                          query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=" or ".join(strm_conds),
@@ -1372,7 +1405,7 @@ class Host(Resolveable):
         # transform query results; see above
         # note: we disable the 'record_cond' because we don't want entries
         # from the "recorded e-VLBI" section of data_input
-        return map(get_sender, raw_query(dbManager.get('correlator_control'),
+        return Lmap(get_sender, raw_query(dbManager.get('correlator_control'),
                                          query_select[truth_tbl(exper, subjob)] (
                                                  experiment=exper, subjob=subjob,
                                                  stream_conds=dt_dsl_rx(portcond).format(self.value),
@@ -1393,7 +1426,7 @@ class Remote(Resolveable):
         # We must resolve our contained item in order to be able to lookup
         # if there is a tunnel defined for the destination
         mk_remote = lambda port: resolved_name(host='127.0.0.1', port=port).update( **self.options() )
-        return map(mk_remote,
+        return Lmap(mk_remote,
                    filter(truth,
                           map(partial(reorder_args(forwards.get, 1, 0), None),
                               map(combine(mk_tuple, maybe_get_host, maybe_get_port),
@@ -1548,11 +1581,11 @@ class ModifierAssociation(Resolveable):
             whichfbtype = type(item.value)
             if whichfbtype in [Number, Host]:
                 # return list-of-stations sending to flexbuf <number> [including flexbuff <aribox>]
-                return map(lambda row: Station(row[0], **item.options()),
+                return Lmap(lambda row: Station(row[0], **item.options()),
                            query(dbManager.get('hardware'), ["station"], "station_flexbuff_assignment", match_fb(fb_name(item.value))))
             elif whichfbtype is Station:
                 # figure out what the local flexbuff(s) are associated with Station
-                return map(lambda row: FlexBuff(Host(row[0]), **item.options()),
+                return Lmap(lambda row: FlexBuff(Host(row[0]), **item.options()),
                            query(dbManager.get('hardware'), ["flexbuff"], "station_flexbuff_assignment", match_st(item.value.value)))
         return []
 
@@ -1587,9 +1620,9 @@ class ModifierSRC(Resolveable):
     # src dst <item>: first resolve item, THEN ask for receiver being set
     def resolve(self):
         if type(self.value) in [ModifierDST, Recorded]:
-            return filter(truth,
+            return List(filter(truth,
                           map(compose(methodcaller('get', 'receiver'), methodcaller('options')),
-                              self.value.value.resolve_as_destination() if type(self.value) is ModifierDST else [self]))
+                              self.value.value.resolve_as_destination() if type(self.value) is ModifierDST else [self])))
         # To be done
         return self.value.resolve_as_source()
 
@@ -1609,7 +1642,7 @@ def mk_reduce_modifier(m):
 
 def mk_mapping_maker(m):
     def do_make(l, **kwargs):
-        return map(partial(m, **kwargs), l)
+        return Lmap(partial(m, **kwargs), l)
     return do_make
 
 is_e_station = compose(partial(query, dbManager.get('ccs'), ["e_station_name"], "eVLBI_Params"), "e_station_name='{0}'".format)
@@ -1639,12 +1672,12 @@ is_unresolved = lambda x: issubclass(type(x), Resolveable)
 just_resolve  = compose(listify, methodcaller('resolve'))
 def trace_resolve(item):
     res = just_resolve(item)
-    print "TRACE: ", item
-    print "  ====>", res
+    print("TRACE: ", item)
+    print("  ====>", res)
     return res
 
 def do_resolve(list_in, real_resolver=just_resolve):
-    return reduce(__add__, map(real_resolver, list_in), [])
+    return reduce(__add__, Lmap(real_resolver, list_in), [])
 
 def resolve(list_in, trace=False):
     # keep on resolving until everything is resolved
@@ -1759,7 +1792,7 @@ def mk_sender(row):
 
 def expand_alle(mo):
     subjob = mo.group(2)
-    return map(compose(maybe_set('subjob', subjob), mk_sender),
+    return Lmap(compose(maybe_set('subjob', subjob), mk_sender),
                raw_query(dbManager.get('correlator_control'), (alle_qry_now if subjob is None else alle_qry_subjob)(subjob)))
 
 ###################################################################
@@ -1792,7 +1825,7 @@ select distinct station, experiment
 mk_station       = lambda row: Station(row[0], experiment=row[1])
 def expand_stations(mo):
     subjob = mo.group(2)
-    return map(compose(maybe_set('subjob', subjob), mk_station),
+    return Lmap(compose(maybe_set('subjob', subjob), mk_station),
                raw_query(dbManager.get('correlator_control'), (stations_qry_now if subjob is None else stations_qry_subjob)(subjob)))
 
 
@@ -1801,7 +1834,7 @@ def maybe_resolve_alias(txt_in, **env):
     # pre-process the aliases
     def procAlias(alias):
         return partial(re.sub, re.compile(r"\b{0}\b".format(alias[0])), alias[1])
-    return maybe_resolve_alias_s(txt_in, map(procAlias, env.get("aliases", {}).iteritems()))
+    return maybe_resolve_alias_s(txt_in, Lmap(procAlias, iteritems(env.get("aliases", {}))))
 
 def maybe_resolve_alias_s(txt_in, aliases):
     # attempt to replace any of the aliases
@@ -1818,16 +1851,16 @@ mk_mk5 = lambda name: (lambda row: resolved_name(name=name, user='jops', host=ro
 def resolve_local_mk5(n, port=None, mk5c=False, user=None):
     #print "Resolve local mk5: n=",n, " port=",port, " mk5c=",mk5c, " user=",user
     name = (("{0:d}" if not mk5c else "c{0:02d}") if isinstance(n, int) else "{0}").format( n )
-    return map(compose(maybe_set_port(port), maybe_set_user(user), mk_mk5(name)), 
+    return Lmap(compose(maybe_set_port(port), maybe_set_user(user), mk_mk5(name)), 
                query(dbManager.get('ccs'), ["assoc_du_ip"], "SU_Params", "name='{0}'".format(name)))
 
 
 def maybe_resolve_sfxc_node(node):
-    return map(lambda row: resolved_name(host=row[0], user='sfxc'),
+    return Lmap(lambda row: resolved_name(host=row[0], user='sfxc'),
                query(dbManager.get('hardware'), ["control_ip"], "sfxc_node", "name='{0}'".format(node)))
 
 def maybe_lookup_evlbi(estation):
-    return map(lambda row: resolved_name(name=estation, host=row[0], user='oper'),
+    return Lmap(lambda row: resolved_name(name=estation, host=row[0], user='oper'),
                query(dbManager.get('ccs'), ["e_station_control_ip"], "eVLBI_Params", "e_station_name='{0}'".format(estation)))
 
 # parser state
@@ -1837,16 +1870,19 @@ class state_type:
         self.tokenstream = tokenizer(self.input_text)
         self.depth       = 0
         self.token       = None
-        self.next()
+        next( self )
 
-    def next(self):
+    def __next__(self):
         self.prev        = self.token
-        self.token       = self.tokenstream.next()
+        self.token       = next( self.tokenstream )
         return self
+
+    # for Py2/Py3 compat
+    next = __next__
 
     def syntax_error(self, msg):
         pos = len(self.input_text) if self.token.position<0 else self.token.position
-        raise SyntaxError, "\n{0}\n{1:>{2}s}^\n{3}".format(self.input_text, "", pos, msg)
+        raise SyntaxError("\n{0}\n{1:>{2}s}^\n{3}".format(self.input_text, "", pos, msg))
 
 tok      = attrgetter('token')
 prev     = attrgetter('prev')
@@ -1886,7 +1922,7 @@ class Mk5Parser(object):
 
     makers = { 
             'number'  : Number,
-            'stations': lambda l, **kwargs: map(methodcaller('update', **kwargs), l), 
+            'stations': lambda l, **kwargs: Lmap(methodcaller('update', **kwargs), l), 
             'range'   : mk_mapping_maker(Number), 
             'nodes'   : mk_mapping_maker(Node),
             'ipv4'    : Host,
@@ -1911,7 +1947,7 @@ class Mk5Parser(object):
             next(state)
         except StopIteration:
             if not result:
-                raise RuntimeError, "No actual addressees specified?"
+                raise RuntimeError("No actual addressees specified?")
             return resolver(result, trace=trace)
         state.syntax_error("Tokens left after parsing")
 
@@ -1936,12 +1972,12 @@ class Mk5Parser(object):
             # the next token should be 'comma' or endtoken
             if tok_tp(s) in [endtoken, None]:
                 break
-            if tok_tp(s) is not 'comma':
+            if tok_tp(s) != 'comma':
                 s.syntax_error("Unexpected token {0}, expected ',' or {1}".format(tok(s), "end-of-input" if endtoken is None else endtoken))
             # consume the comma
             next(s)
         # propagate all options to the resolved names
-        return map(methodcaller('update', **localOpts), parseResult)
+        return Lmap(methodcaller('update', **localOpts), parseResult)
 
     #  mk5spec   = option | addressee
     #  option    = key '=' value
@@ -1956,7 +1992,7 @@ class Mk5Parser(object):
         if addressee is None:
             # We did not find an addressee yet. So at this point we
             # *must* be looking at text?
-            if tok_tp(s) is not 'text':
+            if tok_tp(s) != 'text':
                 s.syntax_error( "Unexpected token {0}, expect an address here{1}".format(
                     tok(s), " [note: there are modifiers in action!]" if modifiers else "") )
 
@@ -2042,7 +2078,7 @@ class Mk5Parser(object):
 
     def maybe_parse_user(self, s):
         # someone thinks we're looking at text '@'
-        if tok_tp(s) is not 'at':
+        if tok_tp(s) != 'at':
             return None
         # verify that the 'text' was a valid user name
         user = prev(s).value
@@ -2054,7 +2090,7 @@ class Mk5Parser(object):
    
     def maybe_parse_modifiers(self, s):
         l = []
-        while tok_tp(s) is 'modifier':
+        while tok_tp(s) == 'modifier':
             l.append( tok_val(s) )
             next(s)
         return l
@@ -2063,7 +2099,7 @@ class Mk5Parser(object):
     def parse_group(self, s, default_port, opts):
         # extract the modification function, if any
         # now we know we _must_ be looking at '('
-        if tok_tp(s) is not 'lparen':
+        if tok_tp(s) != 'lparen':
             s.syntax_error("Unexpected token - expected '('")
         # consume the left parenthesis and move on
         s.depth = s.depth + 1
@@ -2071,7 +2107,7 @@ class Mk5Parser(object):
         # yada yada parse until first closing paren
         grp = self.parse_mk5s(s, default_port, {}, 'rparen')
         # now we _must_ see ')'
-        if tok_tp(s) is not 'rparen':
+        if tok_tp(s) != 'rparen':
             s.syntax_error("Missing close parenthesis")
         # consume the parenthesis
         next(s)
@@ -2080,11 +2116,11 @@ class Mk5Parser(object):
 
     def maybe_parse_port(self, s):
         # check if we're looking at ':' followed by number
-        if tok_tp(s) is not 'colon':
+        if tok_tp(s) != 'colon':
             return None
         # consume the colon and then we expect a number
         next(s)
-        if tok_tp(s) is not 'number':
+        if tok_tp(s) != 'number':
             s.syntax_error("Port number must be a number")
         number = tok_val(s)
         # and consume the number
@@ -2112,7 +2148,7 @@ class Mk5Parser(object):
         # collect all tokens that are 'text', 'number', 'float', 'ipv4' or ':'
         value = ""
         while tok_tp(s) in ['text', 'number', 'float', 'colon', 'ipv4']:
-            value = value + (str(tok_val(s)) if tok_tp(s) is not 'colon' else ':')
+            value = value + (str(tok_val(s)) if tok_tp(s) != 'colon' else ':')
             next(s)
         if not value:
             s.syntax_error("Unexpected token '{0}', expected option value?!".format( tok(s) ))
@@ -2123,12 +2159,12 @@ m5parser = Mk5Parser()
 
 
 
-try_cvt           = lambda cvt, err: compose(choice(is_not_none, identity, do_raise(err)), maybe_exec(cvt, None))
+try_cvt          = lambda cvt, exc, fmt: lambda v: compose(choice(is_not_none, identity, do_raise(exc(fmt(v)))), maybe_exec(cvt, None))(v)
 
 is_a_true         = partial(contains, [True, 'true', 'True'])
 is_a_false        = partial(contains, [False, 'false', 'False', None])
 maybe_bool        = choice(is_a_true, const(True), choice(is_a_false, const(False), const(None)))
-to_bool           = try_cvt(maybe_bool, RuntimeError("Not a boolean"))
+to_bool           = try_cvt(maybe_bool, RuntimeError, "'{0}' is not a boolean 'true' or 'false'".format)
 need_stripnl      = compose(to_bool, maybe_get('stripnl', False))
 need_semicolon    = compose(to_bool, maybe_get('rdbe', False))
 need_fila         = compose(to_bool, maybe_get('fila', False))
@@ -2166,7 +2202,7 @@ def do_repeat(env, rptspec, f):
         except socket.timeout:
             pass
         except Exception as E:
-            print traceback.format_exc() if userinput.debug else str(E)
+            print(traceback.format_exc() if userinput.debug else str(E))
         if niter>0:
             niter-=1
         # only sleep when we must (if we've just
@@ -2183,13 +2219,13 @@ def do_repeat(env, rptspec, f):
         if stop:
             break
     if userinput.debug:
-        print "JOB[{0:d}/THRD {1}] terminating".format( jobid, threading.current_thread().ident )
+        print("JOB[{0:d}/THRD {1}] terminating".format( jobid, threading.current_thread().ident ))
     env.acquire()
     try:
         job.threads.remove( threading.current_thread() )
         # if every thread removed itself, the job can go
         if not job.threads:
-            print "Removing background JOB[{0:d}]".format( jobid )
+            print("Removing background JOB[{0:d}]".format( jobid ))
             del env.jobs[ jobid ]
     except:
         pass
@@ -2199,8 +2235,8 @@ def do_repeat(env, rptspec, f):
 def do_vsi_s(env, ip, port, timeout, cmd):
     try:
         s = opensokkit(ip, port, timeout)
-        s.sendall( cmd )
-        rv = s.recv(1024)
+        s.sendall( cmd.encode('ascii') )
+        rv = s.recv(1024).decode('ascii')
         s.close()
     except socket.timeout:
         rv = "Woopsy - got a timeout"
@@ -2288,7 +2324,7 @@ def printfn(x):
     if not sz or len(x)>sz:
         pydoc.pager(x)
     else:
-        print x
+        print(x)
 
 def ignorefn(*args):
     pass
@@ -2306,7 +2342,7 @@ class collector:
 ####################################################################
 
 def xform_aliases(env, afn):
-    with open(afn) as aliasFile:
+    with open(afn, mode='rb') as aliasFile:
         # transform aliases from [ ... ] to "..."
         def xform_alias(acc, x):
             (k, v) = x
@@ -2314,13 +2350,13 @@ def xform_aliases(env, afn):
                 v = ','.join(v)
             acc[k] = v
             return acc
-        env.aliases = reduce(xform_alias, pickle.load(aliasFile).iteritems(), {})
+        env.aliases = reduce(xform_alias, iteritems(pickle.load(aliasFile)), {})
 
 # one physical line can be slit into multiple logical ones by using 2 or more ';'s
 # note that we first partition the string into a part before comment, '#' and after the comment
 linesplit = compose(re.compile(r'\s*;;+\s*').split, itemgetter(0), methodcaller('partition', '#'))
 cleanup   = compose(str.strip, partial(re.compile(r'\s+;\s+').sub, ';'), partial(re.compile(r'^\s*;\s*').sub, ''))
-get_lines = compose(Filter(GetN(1)), Enumerate(1), Map(compose(GetN(0), Map(str.strip), methodcaller('split', '#'))), open)
+get_lines = compose(List, Filter(GetN(1)), Enumerate(1), Map(compose(GetN(0), List, Map(str.strip), methodcaller('split', '#'))), open)
 def playfile(fn, args):
     lineNr = -1
     try:
@@ -2330,23 +2366,24 @@ def playfile(fn, args):
         for (n, line) in get_lines(fn):
             lineNr = n
             yield line.format(*args)
-    except KeyError, msg:
-        print "{0}:{1} Attempt to substitute key {2} - either use double {{ }} in the script or nothing".format(fn, lineNr, msg)
+    except KeyError as msg:
+        print("{0}:{1} Attempt to substitute key {2} - either use double {{ }} in the script or nothing".format(fn, lineNr, msg))
     except IndexError:
-        print "{0}:{1} Not enough arguments passed to script".format(fn, lineNr)
-    except IOError, msg:
-        print "{0}:{1} {2}".format(fn, lineNr, msg)
+        print("{0}:{1} Not enough arguments passed to script".format(fn, lineNr))
+    except IOError as msg:
+        print("{0}:{1} {2}".format(fn, lineNr, msg))
     except EOFError:
-        raise StopIteration
+        #raise StopIteration
+        return
 
 def readstdio(p):
     while True:
         try:
-            line = raw_input(p.get_prompt()).strip()
+            line = input( p.get_prompt() ).strip()
             if len(line):
                 p.set_prompt( (yield line) )
         except EOFError:
-            raise StopIteration
+            break
 
 def readstring(s):
     for cmd in s.split('\n'):
@@ -2355,6 +2392,10 @@ def readstring(s):
 def readlist(l):
     for line in l:
         yield line.strip()
+
+def handleStripNL(env, mo):
+    collectf(env, "The 'stripnl' command is not available anymore. Use attributes on a host to explicitly set it, e.g.:\n\t> 192.168.1.2:4004,stripnl=[true|false]/sysstat?")
+    return env
 
 def handlePlay(env, mo):
     env.lijst.append( playfile(mo.group('file'), [] if mo.group('args') is None else mo.group('args').split()) )
@@ -2381,7 +2422,7 @@ class background_job(object):
         self.conditionVariable.notify_all()
         self.conditionVariable.release()
         # join all threads
-        map(threading.Thread.join, self.threads)
+        Lmap(threading.Thread.join, self.threads)
         return
 
 class vlbish_ctx(object):
@@ -2444,11 +2485,8 @@ class vlbish_ctx(object):
         return self
 
     def __next__(self):
-        return self.next()
-
-    def next(self):
         try:
-            return next(self.lines)
+            return next( self.lines )
         except StopIteration:
             # if no more generators in lijst, then we're really done
             if not self.lijst:
@@ -2469,7 +2507,10 @@ class vlbish_ctx(object):
         # either a new set of lines have been generated or we popped a
         # linegenerator so we need to trigger another 'next()' to see what's
         # really next
-        return next(self)
+        return next( self )
+
+    # Py2/Py3 compat
+    next = __next__
 
 
 ewrap = lambda f, idx=0: (lambda *args: f(args[idx]))
@@ -2483,6 +2524,7 @@ builtin_commands = [
     (rxTimeout, handleTimeout),
     (rxSleep,   handleSleep),
     (rxPlay,    handlePlay),
+    (rxStripNL, handleStripNL),
     (rxHelp,    usage),
     (rxStop,    ewrap(handleStop)),
     (rxQuit,    ewrap(setattr_('quit', True))),
