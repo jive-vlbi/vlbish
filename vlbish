@@ -229,8 +229,9 @@
 #     using sfxc as the user name in stead of jops (i.e. "ssh sfxc@flexbufX 'uname -m'" )
 #
 #
-# Author:  Harro Verkouter  3 Sep 2010
-# Rewrite: Harro Verkouter 24 Nov 2016
+# Author:    Harro Verkouter      3 Sep 2010
+# Rewrite:   Harro Verkouter     24 Nov 2016
+# Python2/3: Marjolein Verkouter 15 Oct 2020
 from __future__ import print_function
 from functools  import partial, reduce
 from itertools  import product, repeat
@@ -2355,7 +2356,7 @@ def xform_aliases(env, afn):
 # one physical line can be slit into multiple logical ones by using 2 or more ';'s
 # note that we first partition the string into a part before comment, '#' and after the comment
 linesplit = compose(re.compile(r'\s*;;+\s*').split, itemgetter(0), methodcaller('partition', '#'))
-cleanup   = compose(str.strip, partial(re.compile(r'\s+;\s+').sub, ';'), partial(re.compile(r'^\s*;\s*').sub, ''))
+cleanup   = compose(str.strip, partial(re.compile(r';\s*$').sub, ''), partial(re.compile(r'\s+;\s+').sub, ';'), partial(re.compile(r'^\s*;').sub, ''))
 get_lines = compose(List, Filter(GetN(1)), Enumerate(1), Map(compose(GetN(0), List, Map(str.strip), methodcaller('split', '#'))), open)
 def playfile(fn, args):
     lineNr = -1
@@ -2451,7 +2452,7 @@ class vlbish_ctx(object):
 
     def __exit__(self, etype, value, tb):
         # clean up background jobs
-        for job in self.jobs.values():
+        for job in List(self.jobs.values()):
             job.do_stop()
 
         # attempt to save history and aliases IF READLINE IS AVAILABLE (thanks to Oh Se-Jin of KASI)
