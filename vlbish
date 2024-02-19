@@ -498,7 +498,7 @@ def getdbconnection(db, host, port):
     # attempt databaseconnections - stop when no exception is thrown 
     for attempt in [(host, port, db), ("127.0.0.1", forwards.get((host, port)), db)]:
         try:
-            return MYSQL.connect(host=attempt[0], port=attempt[1], db=attempt[2], read_default_file="~/.my.cnf")
+            return MYSQL.connect(host=attempt[0], port=attempt[1], db=attempt[2], read_default_file=os.path.expanduser("~/.my.cnf"))
         except Exception as E:
             print(traceback.format_exc() if userinput.debug else str(E))
             pass
