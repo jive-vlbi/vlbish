@@ -1,0 +1,41 @@
+##alias sender1 (localhost:2621)
+#alias sender2 (localhost:2622)
+#alias receiver (localhost:2620)
+# Note: ipd below makes no sense for receiver but makes the config cmd below execute w/o error
+#       it's harmles
+#### multiple udps connections from localhost to localhost
+alias sender1 (flexbuf4:2631,netport=46227,netprotocol=udps,mtu=9000,ipd=15,dest=flexbuf3)
+alias sender2 (flexbuf4:2632,netport=46228,netprotocol=udps,mtu=9000,ipd=15,dest=flexbuf3)
+alias receiver (flexbuf3:2630,netport=46227\=eth0:46228\=eth1,netprotocol=udps,mtu=9000,ipd=20)
+#### multiple tcp connections from localhost to localhost
+#alias sender1 (localhost:2621,netport=46227,netprotocol=tcp,mtu=9000,ipd=20,dest=localhost)
+#alias sender2 (localhost:2622,netport=46228,netprotocol=tcp,mtu=9000,ipd=20,dest=localhost)
+#alias receiver (localhost:2620,netport=46227\=DS0:46228\=DS1,netprotocol=tcp,mtu=9000,ipd=20)
+#alias receiver (localhost:2620,netport=46227:46228,netprotocol=tcp,mtu=9000,ipd=20)
+
+# set net_protocol & mtu & data format same
+#sender1, sender2, receiver/net_protocol=udps:256k:4M; mtu=9000; ipd=20; mode=VDIF_8192-1024-16-2
+sender1, sender2, receiver/net_protocol={{netprotocol}}:256k:4M; mtu={{mtu}}; ipd={{ipd}}; mode=VDIF_8192-1024-16-2
+# don't write to disk
+receiver/set_disks=null
+
+# set up multiport receiver
+#receiver/net_port=10.87.6.138@46227:10.87.6.138@46228
+receiver/net_port={{netport}} #46227:46228
+receiver/record=mk6:0
+receiver/record=on:multitest1
+
+# connect the senders
+#sender1/net_port=46227; fill2net=connect:10.87.6.138
+#sender2/net_port=46228; fill2net=connect:10.87.6.138
+#sender1/net_port=46227; fill2net=connect:localhost
+#sender2/net_port=46228; fill2net=connect:localhost
+sender1/net_port={{netport}}; fill2net=connect:{{dest}}
+sender2/net_port={{netport}}; fill2net=connect:{{dest}}
+sender1,sender2/fill2net=on:-1
+
+repeat=2,ncount=5,sender1,sender2/tstat?
+repeat=2,ncount=5,receiver/tstat?; evlbi?;
+sleep 20
+receiver/record=off
+sender1,sender2/fill2net=disconnect
