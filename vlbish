@@ -1102,9 +1102,11 @@ class DBBC(Resolveable):
 
     def resolve(self):
         # if we were a generic host transformed to 'dbbc' then let the contained value resolve itself
+        updatert = partial(resolved_name.update, **d_filter_n(['port'])(self.options()))
         if type(self.value) is Host:
-            return self.value.resolve()
-        return Lmap(partial(resolved_name.update, **d_filter_n(['port'])(self.options())), maybe_lookup_dbbc(self.value.value))
+            return updatert( self.value.resolve() )
+        return Lmap(updatert, maybe_lookup_dbbc(self.value.value))
+
 
 class FiLa(DBBC):
     def __init__(self, fila, **kwargs):
@@ -2015,7 +2017,8 @@ class Mk5Parser(object):
             # ok not an option
             user = self.maybe_parse_user(s)
             # if we've seen user@ we MUST see an address now, otherwise interpret textField as just-a-name
-            addressee = self.parse_address(s, default_port) if user else listify( Mk5Parser.makers['text'](textField, port=default_port) )
+            addressee = self.parse_address(s, default_port) if user else \
+                        listify( Mk5Parser.makers['text'](textField, port=self.maybe_parse_port(s) or default_port) )
         # before returning, set the user if one was given
         if addressee is not None and user is not None:
             addressee = partial(swap_args(modifier_set_user), user)(addressee) 
