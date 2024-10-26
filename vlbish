@@ -371,6 +371,8 @@ parsert.add_argument('--debug',  dest='debug', action='store_true', default=Fals
                      help="Print debugging information")
 parsert.add_argument('--queries',  dest='queries', action='store_true', default=False, 
                      help="Print queries as they are sent to the DB")
+parsert.add_argument('--tokens',  dest='tokens', action='store_true', default=False, 
+                     help="Print tokenizer trace as commands are processed")
 parsert.add_argument('--testdb', dest='db', action='store_const', default="db0.jive.nl", const="db-test.jive.nl",
                      help="Use test database in stead of production")
 parsert.add_argument('--nosql', dest='sql', action='store_false', default=True,
@@ -419,20 +421,20 @@ screenSize = getScreenSize()
 
 # debug?
 def print_debug(pfx):
-    realpfx = "{0}:".format(pfx)
+    realpfx = "{0}: ".format(pfx)
     def print_it(x):
         print(realpfx, x)
         return x
     return print_it
 
 D  = print_debug("DEBUG") if userinput.debug else identity
-DD = (lambda y: print_debug(y)) if userinput.debug else (lambda y: identity)
+DD = (lambda y: print_debug(y)) if userinput.debug else (lambda _: identity)
 
 # queries?
-def print_query(x):
-    print("QUERY: ", x)
-    return x
-Q = print_query if userinput.queries else identity
+Q = print_debug("QUERY") if userinput.queries else identity
+
+# Parser debug?
+T = print_debug("TOKENIZER") if userinput.tokens else identity
 
 # regexen
 rxAlias     = re.compile(r"^alias((\s+(?P<alias>\S+))(\s+(?P<selection>\S.+))?)?$", re.I).match
@@ -781,16 +783,23 @@ def mk_tokenizer(tokens):
         pp_tokens      = Lmap(lambda rx_tp: (partial(rx_tp[0].match, string), rx_tp[1]), tokens)
         # 'creator' is the function that makes the token -
         (pos, creator) = (0, itemgetter(1))
+        T("")
         while pos<len(string):
+            T(string)
+            T((" "*pos if pos > 0 else "")+"^")
             # Run all known regexps against the current string and filter out which one matched
             moList  = Lmap(lambda mo_tp: (mo_tp[0], (creator(mo_tp))(mo_tp[0], position=pos, **env)),
-                          filter(filter_fn,
-                                 map(lambda rx_tf: (rx_tf[0](pos), rx_tf[1]), pp_tokens)))
+                            # sort multiple matches longest first
+                           sorted(
+                               filter(filter_fn,
+                                  map(lambda rx_tf: (rx_tf[0](pos), rx_tf[1]), pp_tokens)),
+                               key=lambda mo_tp: mo_tp[0].end() - mo_tp[0].start(), reverse=True))
+            T("\n\t".join(map(str,moList)))
             if len(moList)==0:
                 raise RuntimeError("\n{0}\n{1:>{2}s}^\n{3} tokens matched here".format(string, "", pos, len(moList)))
             # extract match-object and the token from the result list
             (mo, token)  = moList[0]
-            pos         += (mo.end() - mo.start())
+            pos          = mo.end()
             if token is not None:
                 # If we find a token that is of the escape type, the next
                 # token will be passed to the escaper in stead of to the
